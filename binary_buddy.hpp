@@ -50,13 +50,13 @@ private:
   int _maxBlockSizeLog2;
 
   // Array of free lists for each block size
-  double_link _freeList[NUM_LISTS];
+  double_link _freeList[NUM_LEVELS];
   // double_link _freeList[];
 
   // XOR Bitmap of allocated blocks
-//   unsigned char _allocatedBlocks[((1 << (NUM_LISTS - 1)) / 16) + 2] = {0}; 
+//   unsigned char _allocatedBlocks[((1 << (NUM_LEVELS - 1)) / 16) + 2] = {0}; 
   unsigned char _allocatedBlocks[BITMAP_SIZE] = {0}; 
 
   // Bitmap of split blocks
-  unsigned char _splitBlocks[((1 << (NUM_LISTS - 1)) / 8) + 1] = {0};
+  unsigned char _splitBlocks[((1 << (NUM_LEVELS - 1)) / 8) + 1] = {0};
 };

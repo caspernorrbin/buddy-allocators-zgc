@@ -88,7 +88,7 @@ int BinaryBuddyAllocator::buddy_index(void *p, int level) {
 }
 
 int BinaryBuddyAllocator::get_level(void *p) {
-  for (int i = NUM_LISTS - 1; i > 0; i--) {
+  for (int i = NUM_LEVELS - 1; i > 0; i--) {
     BUDDY_DBG("block_index: " << block_index(p, i - 1));
     if (bit_is_set(_splitBlocks, block_index(p, i - 1))) {
       BUDDY_DBG("level is: " << i);
@@ -185,7 +185,7 @@ void *BinaryBuddyAllocator::allocate(std::size_t totalSize) {
         void *block =
             static_cast<void *>(pop_first(&_freeList[block_list_idx]));
 
-        // if (block_list_idx + 1 < NUM_LISTS - 1) {
+        // if (block_list_idx + 1 < NUM_LEVELS - 1) {
         BUDDY_DBG("setting split_idx " << block_index(block, block_list_idx));
         set_bit(_splitBlocks, block_index(block, block_list_idx));
         // }
@@ -224,7 +224,7 @@ void *BinaryBuddyAllocator::allocate(std::size_t totalSize) {
     void *block = static_cast<void *>(pop_first(&_freeList[block_list_idx]));
     // std::cout << "given block: " << block << std::endl;
     // std::cout << "level: " << block_list_idx << std::endl;
-    // if (block_list_idx < NUM_LISTS - 1) {
+    // if (block_list_idx < NUM_LEVELS - 1) {
     BUDDY_DBG("Flipping final map_idx "
               << mapIndex(block_index(block, block_list_idx)));
     // set_bit(_allocatedBlocks, mapIndex(block_index(block, block_list_idx)));
@@ -271,7 +271,7 @@ void BinaryBuddyAllocator::deallocate(void *ptr) {
                          << reinterpret_cast<void *>(buddy) - _start
                          << std::endl);
 
-    if (level < NUM_LISTS - 1) {
+    if (level < NUM_LEVELS - 1) {
       BUDDY_DBG("clearing split_idx " << block_index(ptr, level));
       clear_bit(_splitBlocks, block_index(static_cast<void *>(ptr), level));
     }
@@ -289,7 +289,7 @@ void BinaryBuddyAllocator::deallocate(void *ptr) {
     }
   }
 
-  if (level < NUM_LISTS - 1) {
+  if (level < NUM_LEVELS - 1) {
     BUDDY_DBG("clearing split_idx " << block_index(ptr, level));
     clear_bit(_splitBlocks, block_index(static_cast<void *>(ptr), level));
   }
@@ -299,7 +299,7 @@ void BinaryBuddyAllocator::deallocate(void *ptr) {
 }
 
 void BinaryBuddyAllocator::print_free_list() {
-  for (std::size_t i = 0; i < NUM_LISTS; i++) {
+  for (std::size_t i = 0; i < NUM_LEVELS; i++) {
     std::cout << "Free list " << i << "(" << (1 << (MAX_SIZE_LOG2 - i))
               << "): ";
     for (double_link *link = _freeList[i].next; link != &_freeList[i];
@@ -314,13 +314,13 @@ void BinaryBuddyAllocator::print_free_list() {
 
 void BinaryBuddyAllocator::print_bitmaps() {
   std::cout << "Allocated blocks: ";
-  for (int i = 0; i < ((1 << (NUM_LISTS - 1)) / 16) + 1; i++) {
+  for (int i = 0; i < ((1 << (NUM_LEVELS - 1)) / 16) + 1; i++) {
     std::cout << static_cast<int>(_allocatedBlocks[i]) << " ";
   }
   std::cout << std::endl;
 
   std::cout << "Split blocks: ";
-  for (int i = 0; i < ((1 << (NUM_LISTS - 1)) / 8) + 1; i++) {
+  for (int i = 0; i < ((1 << (NUM_LEVELS - 1)) / 8) + 1; i++) {
     std::cout << static_cast<int>(_splitBlocks[i]) << " ";
   }
   std::cout << std::endl;
