@@ -4,21 +4,18 @@
 #include <cstring>
 #include <unistd.h>
 
-uint8_t mempool[1 << MAX_SIZE_LOG2];
-uint8_t allocatorpool[sizeof(IBuddyAllocator)];
-static IBuddyAllocator *allocator = nullptr;
+using Config = IBuddyConfig<4, 25>;
+
+// uint8_t mempool[1 << MAX_SIZE_LOG2];
+// uint8_t allocatorpool[sizeof(IBuddyAllocator<Config>)];
+static IBuddyAllocator<Config> *allocator = nullptr;
 
 extern "C" {
 void init_buddy() {
-  if (sizeof(IBuddyAllocator) > sizeof(allocatorpool)) {
-    // Handle the case where the allocator pool is too small
-    // You may want to log an error message or terminate the program
-    abort();
-  }
-
   // allocator = reinterpret_cast<BinaryBuddyAllocator *>(allocatorpool);
   allocator =
-      IBuddyAllocator::create(allocatorpool, mempool, 1 << MAX_SIZE_LOG2, MIN_SIZE_LOG2, MAX_SIZE_LOG2);
+      IBuddyAllocator<Config>::create(nullptr, nullptr, 1 << 25, 31);
+      // IBuddyAllocator<Config>::create(allocatorpool, mempool, 1 << MAX_SIZE_LOG2, MIN_SIZE_LOG2, MAX_SIZE_LOG2);
   // reinterpret_cast<BinaryBuddyAllocator*>(sbrk(sizeof(BinaryBuddyAllocator)));
   // *(allocator) = IBuddyAllocator(mempool, 1 << 21, 4, 21);
 }

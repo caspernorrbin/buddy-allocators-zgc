@@ -11,6 +11,12 @@
   } while (0)
 #endif
 
+template class IBuddyAllocator<IBuddyConfig<4, 25>>;
+template class IBuddyAllocator<IBuddyConfig<4, 23>>;
+template class IBuddyAllocator<IBuddyConfig<4, 21>>;
+template class IBuddyAllocator<IBuddyConfig<4, 10>>;
+template class IBuddyAllocator<IBuddyConfig<4, 8>>;
+
 static inline bool list_empty(double_link *head) { return head->next == head; }
 
 static inline void list_remove(double_link *node) {
@@ -83,19 +89,27 @@ static inline size_t round_up_pow2(size_t size) {
 }
 
 // Returns the size of a block at the given level
-int IBuddyAllocator::size_of_level(int level) { return _totalSize >> level; }
-
-int IBuddyAllocator::index_in_level(void *ptr, int level) {
+template <typename Config>
+int IBuddyAllocator<Config>::size_of_level(int level) {
+  return _totalSize >> level;
+}
+template <typename Config>
+int IBuddyAllocator<Config>::index_in_level(void *ptr, int level) {
   return (reinterpret_cast<uintptr_t>(ptr) - _start) / size_of_level(level);
 }
 
-int IBuddyAllocator::index_of_level(int level) { return (1 << level) - 1; }
+template <typename Config>
+int IBuddyAllocator<Config>::index_of_level(int level) {
+  return (1 << level) - 1;
+}
 
-int IBuddyAllocator::block_index(void *ptr, int level) {
+template <typename Config>
+int IBuddyAllocator<Config>::block_index(void *ptr, int level) {
   return index_of_level(level) + index_in_level(ptr, level);
 }
 
-int IBuddyAllocator::buddy_index(void *ptr, int level) {
+template <typename Config>
+int IBuddyAllocator<Config>::buddy_index(void *ptr, int level) {
   int block_idx = block_index(ptr, level);
   if (block_idx % 2 == 0) {
     return block_idx - 1;
@@ -105,7 +119,7 @@ int IBuddyAllocator::buddy_index(void *ptr, int level) {
   // return (block_idx + 1) ^ 1;
 }
 
-int IBuddyAllocator::get_level(void *ptr) {
+template <typename Config> int IBuddyAllocator<Config>::get_level(void *ptr) {
   for (int i = _numLevels - 1; i > 0; i--) {
     BUDDY_DBG("block_index: " << block_index(ptr, i - 1));
     if (bit_is_set(_splitBlocks, block_index(ptr, i - 1))) {
@@ -117,12 +131,14 @@ int IBuddyAllocator::get_level(void *ptr) {
 }
 
 // Returns the number of blocks needed to fill the given size
-int IBuddyAllocator::num_blocks(size_t size, int level) {
+template <typename Config>
+int IBuddyAllocator<Config>::num_blocks(size_t size, int level) {
   return size / size_of_level(level) + (size % size_of_level(level) != 0);
 }
 
 // Returns the buddy of the given block
-void *IBuddyAllocator::get_buddy(void *ptr, int level) {
+template <typename Config>
+void *IBuddyAllocator<Config>::get_buddy(void *ptr, int level) {
   if (level == 0) {
     return ptr;
   }
@@ -134,14 +150,16 @@ void *IBuddyAllocator::get_buddy(void *ptr, int level) {
 }
 
 // Aligns the given pointer to the left-most pointer of the block
-void *IBuddyAllocator::align_left(void *ptr, int level) {
+template <typename Config>
+void *IBuddyAllocator<Config>::align_left(void *ptr, int level) {
   return reinterpret_cast<void *>(
       _start +
       size_of_level(level) * (block_index(ptr, level) - index_of_level(level)));
 }
 
-IBuddyAllocator::IBuddyAllocator(void *start, size_t totalSize,
-                                 int minBlockSizeLog2, int maxBlockSizeLog2) {
+template <typename Config>
+IBuddyAllocator<Config>::IBuddyAllocator(void *start, size_t totalSize,
+                                         int lazyThreshold) {
   if (start == nullptr) {
     start = mmap(nullptr, totalSize, PROT_READ | PROT_WRITE,
                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -154,11 +172,8 @@ IBuddyAllocator::IBuddyAllocator(void *start, size_t totalSize,
 
   _start = reinterpret_cast<uintptr_t>(start);
 
+  _lazyThreshold = lazyThreshold;
   _totalSize = totalSize;
-
-  _minBlockSizeLog2 = minBlockSizeLog2;
-  _maxBlockSizeLog2 = maxBlockSizeLog2;
-  _numLevels = maxBlockSizeLog2 - minBlockSizeLog2 + 1;
 
   if (totalSize < static_cast<size_t>(1 << _maxBlockSizeLog2)) {
     BUDDY_DBG("Total size must be at least 2^" << _maxBlockSizeLog2);
@@ -166,7 +181,7 @@ IBuddyAllocator::IBuddyAllocator(void *start, size_t totalSize,
   }
 
   // Initialize bitmaps
-  for (int i = 0; i < BITMAP_SIZE; i++) {
+  for (int i = 0; i < Config::bitmapSize; i++) {
     // _freeBlocks[i] = 0xAA; // 10101010
     _freeBlocks[i] = 0x55; // 01010101
   }
@@ -195,9 +210,10 @@ IBuddyAllocator::IBuddyAllocator(void *start, size_t totalSize,
 }
 
 // Creates a buddy allocator at the given address
-IBuddyAllocator *IBuddyAllocator::create(void *addr, void *start,
-                                         size_t totalSize, int minBlockSizeLog2,
-                                         int maxBlockSizeLog2) {
+template <typename Config>
+IBuddyAllocator<Config> *
+IBuddyAllocator<Config>::create(void *addr, void *start, size_t totalSize,
+                                int lazyThreshold) {
 
   IBuddyAllocator *ba = nullptr;
 
@@ -213,14 +229,15 @@ IBuddyAllocator *IBuddyAllocator::create(void *addr, void *start,
   ba = static_cast<IBuddyAllocator *>(addr);
 
   return new (ba)
-      IBuddyAllocator(start, totalSize, minBlockSizeLog2, maxBlockSizeLog2);
+      IBuddyAllocator(start, totalSize, lazyThreshold);
 }
 
-IBuddyAllocator::~IBuddyAllocator() {
-}
+template <typename Config> IBuddyAllocator<Config>::~IBuddyAllocator() {}
 
 // Marks blocks as split above the given level
-void IBuddyAllocator::split_bits(void *ptr, int level_start, int level_end) {
+template <typename Config>
+void IBuddyAllocator<Config>::split_bits(void *ptr, int level_start,
+                                         int level_end) {
   BUDDY_DBG("splitting bits from " << level_start << " to " << level_end);
   for (int i = level_start; i < level_end && i < _numLevels - 1; i++) {
     BUDDY_DBG("splitting bit at " << block_index(ptr, i));
@@ -229,12 +246,14 @@ void IBuddyAllocator::split_bits(void *ptr, int level_start, int level_end) {
 }
 
 // Returns the size of the allocated block
-size_t IBuddyAllocator::get_alloc_size(void *ptr) {
+template <typename Config>
+size_t IBuddyAllocator<Config>::get_alloc_size(void *ptr) {
   return size_of_level(get_level(ptr));
 }
 
 // Allocates a block of memory of the given size
-void *IBuddyAllocator::allocate(size_t totalSize) {
+template <typename Config>
+void *IBuddyAllocator<Config>::allocate(size_t totalSize) {
   // Allocation too large
   if (totalSize > static_cast<size_t>(_maxSize)) {
     BUDDY_DBG("Requested size is too large");
@@ -259,7 +278,8 @@ void *IBuddyAllocator::allocate(size_t totalSize) {
   }
 
   int level = _topLevel;
-  BUDDY_DBG("level: " << level << " size: " << size_of_level(level));
+  BUDDY_DBG("at level: " << level
+                         << " with block size: " << size_of_level(level));
 
   // No free block large enough available
   if (level == _numLevels || list_empty(&_freeList[level]) ||
@@ -271,11 +291,15 @@ void *IBuddyAllocator::allocate(size_t totalSize) {
   // Get the first free block
   void *block = pop_first(&_freeList[level]);
 
-  // Mark the block as allocated
-  clear_bit(_freeBlocks, block_index(block, level));
+  int block_level = find_smallest_block_level(totalSize);
 
   // Mark above blocks as split
-  split_bits(block, level, find_smallest_block_level(totalSize));
+  split_bits(block, level, block_level);
+
+  level = block_level;
+
+  // Mark the block as allocated
+  clear_bit(_freeBlocks, block_index(block, level));
   BUDDY_DBG("allocated block " << block_index(block, level) << " at "
                                << block - _start << " level: " << level);
 
@@ -292,6 +316,8 @@ void *IBuddyAllocator::allocate(size_t totalSize) {
   // Clear all smaller levels
   int start_level = find_smallest_block_level(totalSize);
   int new_size = round_up_pow2(totalSize);
+
+  BUDDY_DBG("STARTING LEVEL: " << start_level << " SIZE: " << totalSize);
 
   for (int i = start_level; i < _numLevels; i++) {
     int start_block_idx = block_index(block_left, i);
@@ -316,7 +342,8 @@ void *IBuddyAllocator::allocate(size_t totalSize) {
 }
 
 // Deallocates a single (smallest) block of memory
-void IBuddyAllocator::deallocate_single(void *ptr) {
+template <typename Config>
+void IBuddyAllocator<Config>::deallocate_single(void *ptr) {
 
   int level = _numLevels - 1;
   int block_idx = block_index(ptr, level);
@@ -352,7 +379,8 @@ void IBuddyAllocator::deallocate_single(void *ptr) {
 }
 
 // Deallocates a range of blocks of memory as if they were the smallest block
-void IBuddyAllocator::deallocate_range(void *ptr, size_t size) {
+template <typename Config>
+void IBuddyAllocator<Config>::deallocate_range(void *ptr, size_t size) {
   uintptr_t start = reinterpret_cast<uintptr_t>(ptr);
   for (uintptr_t i = start; i < start + size;
        i += size_of_level(_numLevels - 1)) {
@@ -364,37 +392,43 @@ void IBuddyAllocator::deallocate_range(void *ptr, size_t size) {
 }
 
 // Deallocates a block of memory of the given size
-void IBuddyAllocator::deallocate(void *ptr, size_t size) {
-  // if (size <= static_cast<size_t>(_minSize) && _lazyListSize <
-  // LAZY_THRESHOLD) {
-  //   BUDDY_DBG("inserting " << ptr - _start << " with index "
-  //                          << block_index(ptr, _numLevels - 1)
-  //                          << " into lazy list");
-  //   push_back(&_lazyList, reinterpret_cast<double_link *>(ptr));
-  //   _lazyListSize++;
-  //   BUDDY_DBG("lazy list size: " << _lazyListSize);
-  //   return;
-  // }
+template <typename Config>
+void IBuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
+  if (size <= static_cast<size_t>(_minSize) && _lazyListSize < _lazyThreshold) {
+    BUDDY_DBG("inserting " << ptr - _start << " with index "
+                           << block_index(ptr, _numLevels - 1)
+                           << " into lazy list");
+    push_back(&_lazyList, reinterpret_cast<double_link *>(ptr));
+    _lazyListSize++;
+    BUDDY_DBG("lazy list size: " << _lazyListSize);
+    return;
+  }
 
   return deallocate_range(ptr, round_up_pow2(size));
 }
 
 // Deallocates a block of memory
-void IBuddyAllocator::deallocate(void *ptr) {
+template <typename Config> void IBuddyAllocator<Config>::deallocate(void *ptr) {
   if (ptr == nullptr || reinterpret_cast<uintptr_t>(ptr) < _start ||
       reinterpret_cast<uintptr_t>(ptr) >= _start + _totalSize) {
     return;
   }
 
-  // int level = get_level(ptr);
-  // size_t size = size_of_level(level);
   size_t size = get_alloc_size(ptr);
   BUDDY_DBG("deallocate size: " << size);
   return deallocate(ptr, size);
 }
 
+template <typename Config> void IBuddyAllocator<Config>::empty_lazy_list() {
+  while (_lazyListSize > 0) {
+    void *block = pop_first(&_lazyList);
+    _lazyListSize--;
+    deallocate_single(block);
+  }
+}
+
 // Prints the free list
-void IBuddyAllocator::print_free_list() {
+template <typename Config> void IBuddyAllocator<Config>::print_free_list() {
   for (size_t i = 0; i < static_cast<size_t>(_numLevels); i++) {
     std::cout << "Free list " << i << "(" << (1 << (_maxBlockSizeLog2 - i))
               << "): ";
@@ -406,10 +440,11 @@ void IBuddyAllocator::print_free_list() {
     }
     std::cout << std::endl;
   }
+  std::cout << "Lazy list size: " << _lazyListSize << std::endl;
 }
 
 // Prints the bitmaps
-void IBuddyAllocator::print_bitmaps() {
+template <typename Config> void IBuddyAllocator<Config>::print_bitmaps() {
   std::cout << "Allocated blocks: ";
   for (int i = 0; i < ((1 << (_numLevels - 1)) / 16) + 1; i++) {
     std::cout << static_cast<int>(_freeBlocks[i]) << " ";
@@ -424,7 +459,8 @@ void IBuddyAllocator::print_bitmaps() {
 }
 
 // Returns the level of the smallest block that can fit the given size
-int IBuddyAllocator::find_smallest_block_level(size_t size) {
+template <typename Config>
+int IBuddyAllocator<Config>::find_smallest_block_level(size_t size) {
   for (int i = _minBlockSizeLog2; i <= _maxBlockSizeLog2; i++) {
     if (size <= static_cast<size_t>(1 << i)) {
       BUDDY_DBG("level: " << _maxBlockSizeLog2 - i << " size: " << (1 << i));
