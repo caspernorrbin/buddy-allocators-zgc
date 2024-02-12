@@ -3,6 +3,7 @@ main: ibuddy
 CPP_COMPILER = g++
 CPP_FLAGS = -Wall -Wextra -std=c++14 -pedantic -g
 SHARED_LIB = libbuddy.so
+CPP_UNIT = -lcppunit
 
 %_d.o: %.cpp
 	$(CPP_COMPILER) $(CPP_FLAGS) -DDEBUG -fPIC -c $<
@@ -30,5 +31,8 @@ ibuddy: itest.o ibuddy.o
 ibuddy_debug: itest_d.o ibuddy_d.o
 	$(CPP_COMPILER) $(CPP_FLAGS) -DDEBUG -o buddy.out itest.o ibuddy.o
 
+test: buddy_test.o ibuddy.o
+	$(CPP_COMPILER) $(CPP_FLAGS) -o test.out buddy_test.o ibuddy.o $(CPP_UNIT)
+
 clean:
-	rm -rf *.o buddy.out $(SHARED_LIB)
+	rm -rf *.o test.out buddy.out $(SHARED_LIB)

@@ -6,11 +6,13 @@ int main() {
   const unsigned int minSizeLog2 = 4;
   const unsigned int maxSizeLog2 = 8;
   const int numRegions = 1;
-  const int sizeBits = 4;
+  const int sizeBits = 0;
   const int lazyThreshold = 0;
   const bool startFull = false;
+  const bool useSizeMap = true;
 
-  using Config = IBuddyConfig<minSizeLog2, maxSizeLog2, numRegions, sizeBits>;
+  using Config =
+      IBuddyConfig<minSizeLog2, maxSizeLog2, numRegions, useSizeMap, sizeBits>;
 
   unsigned char mempool[(1U << maxSizeLog2) * numRegions];
   IBuddyAllocator<Config> *allocator = IBuddyAllocator<Config>::create(
@@ -54,7 +56,7 @@ int main() {
   allocator->deallocate(block5);
   allocator->deallocate(block6);
 
-  // allocator->empty_lazy_list();
+  allocator->empty_lazy_list();
   allocator->print_free_list();
   allocator->print_bitmaps();
 
@@ -76,7 +78,7 @@ int main() {
     std::cout << "Total blocks allocated: " << totals << std::endl;
 
     allocator->print_free_list();
-    // allocator->print_bitmaps();
+    allocator->print_bitmaps();
 
     const int stride = 3;
 
@@ -89,9 +91,8 @@ int main() {
 
   // allocator->deallocate(block1);
 
-  // allocator->print_free_list();
-  // allocator->empty_lazy_list();
-  // allocator->print_free_list();
+  allocator->empty_lazy_list();
+  allocator->print_free_list();
 
   return 0;
 }

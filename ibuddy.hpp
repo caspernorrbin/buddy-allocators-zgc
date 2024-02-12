@@ -5,7 +5,7 @@
 #include <cstdint>
 
 template <unsigned int MIN_BLOCK_SIZE_LOG2, unsigned int MAX_BLOCK_SIZE_LOG2,
-          int NUM_REGIONS, int SIZE_BITS>
+          int NUM_REGIONS, bool USE_SIZEMAP, int SIZE_BITS>
 struct IBuddyConfig {
   static const int minBlockSizeLog2 = MIN_BLOCK_SIZE_LOG2;
   static const int maxBlockSizeLog2 = MAX_BLOCK_SIZE_LOG2;
@@ -14,11 +14,13 @@ struct IBuddyConfig {
   static const unsigned char numLevels =
       MAX_BLOCK_SIZE_LOG2 - MIN_BLOCK_SIZE_LOG2 + 1;
   static const int numRegions = NUM_REGIONS;
+  static const bool useSizeMap = USE_SIZEMAP;
   static const int allocedBitmapSize = (1U << (numLevels)) / 8;
   static const int sizeBits = SIZE_BITS;
   static const int sizeBitmapSize =
-      (SIZE_BITS == 0) ? (1U << (numLevels - 1U)) / 8
-                       : SIZE_BITS * maxBlockSize / minBlockSize / 8;
+      !USE_SIZEMAP       ? 0
+      : (SIZE_BITS == 0) ? (1U << (numLevels - 1U)) / 8
+                         : SIZE_BITS * maxBlockSize / minBlockSize / 8;
 };
 
 struct double_link {
@@ -43,6 +45,7 @@ public:
   void deallocate(void *ptr, size_t size);
   void deallocate_range(void *ptr, size_t size);
   void empty_lazy_list();
+  size_t free_size();
 
   void print_free_list();
   void print_bitmaps();
@@ -68,6 +71,8 @@ private:
   int find_smallest_block_level(size_t size);
 
   uintptr_t _start;
+  size_t _freeSize;
+  size_t _totalSize;
 
   const uint8_t _numRegions = Config::numRegions;
   const uint8_t _numLevels = Config::numLevels;
@@ -76,7 +81,8 @@ private:
   const size_t _minSize = Config::minBlockSize;
   const size_t _maxSize = Config::maxBlockSize;
   const int _sizeBits = Config::sizeBits;
-  const bool _sizeMapEnabled = Config::sizeBits == 0;
+  const bool _sizeMapEnabled = Config::useSizeMap;
+  const bool _sizeMapIsBitmap = Config::sizeBits == 0;
 
   int _lazyThreshold = 0;
   int _topLevel[Config::numRegions] = {0};

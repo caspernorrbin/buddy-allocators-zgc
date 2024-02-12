@@ -59,18 +59,18 @@ void clear_bit(unsigned char *bitmap, int index) {
   bitmap[index / 8] &= ~(1U << (static_cast<unsigned int>(index) % 8));
 }
 
-void flip_bit(unsigned char *bitmap, int index) {
-  bitmap[index / 8] ^= (1U << (static_cast<unsigned int>(index) % 8));
-}
+// void flip_bit(unsigned char *bitmap, int index) {
+//   bitmap[index / 8] ^= (1U << (static_cast<unsigned int>(index) % 8));
+// }
 
-int map_index(int index) {
-  // if (index == 0) {
-  //   return 0;
-  // } else {
-  //   return (index - 1) / 2 + 1;
-  // }
-  return (index - 1) / 2;
-}
+// int map_index(int index) {
+//   // if (index == 0) {
+//   //   return 0;
+//   // } else {
+//   //   return (index - 1) / 2 + 1;
+//   // }
+//   return (index - 1) / 2;
+// }
 
 size_t round_up_pow2(size_t size) {
   if (size == 0) {
@@ -132,7 +132,7 @@ unsigned int IBuddyAllocator<Config>::buddy_index(uintptr_t ptr, uint8_t region,
 template <typename Config>
 uint8_t IBuddyAllocator<Config>::get_level(uintptr_t ptr) {
   uint8_t region = get_region(ptr);
-  if (!_sizeMapEnabled) {
+  if (!_sizeMapIsBitmap) {
     int index = (ptr - region_start(region)) / _minSize;
 
     if (_sizeBits == 8) {
@@ -149,9 +149,9 @@ uint8_t IBuddyAllocator<Config>::get_level(uintptr_t ptr) {
   }
 
   for (uint8_t i = _numLevels - 1; i > 0; i--) {
-    BUDDY_DBG("block_index: " << block_index(ptr, region, i - 1));
+    // BUDDY_DBG("block_index: " << block_index(ptr, region, i - 1));
     if (bit_is_set(_sizeMap[region], block_index(ptr, region, i - 1))) {
-      BUDDY_DBG("level is: " << i);
+      BUDDY_DBG("level is: " << (int)i);
       return i;
     }
   }
@@ -201,6 +201,10 @@ void IBuddyAllocator<Config>::init_bitmaps(bool startFull) {
     }
   }
 
+  if (!_sizeMapEnabled) {
+    return;
+  }
+
   if (Config::sizeBits == 0) { // Bitmap indicates split blocks
     if (startFull) {
       for (int i = 0; i < Config::numRegions; i++) {
@@ -248,7 +252,8 @@ IBuddyAllocator<Config>::IBuddyAllocator(void *start, int lazyThreshold,
   _start = reinterpret_cast<uintptr_t>(start);
 
   _lazyThreshold = lazyThreshold;
-  // _totalSize = Config::numRegions * Config::maxBlockSize;
+  _totalSize = Config::numRegions * Config::maxBlockSize;
+  _freeSize = startFull ? 0 : _totalSize;
 
   // Initialize bitmaps
   init_bitmaps(startFull);
@@ -310,8 +315,9 @@ template <typename Config>
 void IBuddyAllocator<Config>::split_bits(uintptr_t ptr, uint8_t region,
                                          uint8_t level_start,
                                          uint8_t level_end) {
-  BUDDY_DBG("splitting bits from " << level_start << " to " << level_end
-                                   << " in region " << region);
+  BUDDY_DBG("splitting bits from " << (int)level_start << " to "
+                                   << (int)level_end << " in region "
+                                   << region);
   for (uint8_t i = level_start; i < level_end && i < _numLevels - 1; i++) {
     BUDDY_DBG("splitting bit at " << block_index(ptr, region, i));
     set_bit(_sizeMap[region], block_index(ptr, region, i));
@@ -365,6 +371,7 @@ void *IBuddyAllocator<Config>::allocate(size_t totalSize) {
               << " at " << reinterpret_cast<uintptr_t>(block) - _start
               << " level: " << _numLevels - 1);
     _lazyListSize--;
+    _freeSize -= _minSize;
 
     return block;
   }
@@ -408,19 +415,22 @@ void *IBuddyAllocator<Config>::allocate(size_t totalSize) {
 
   // Mark above blocks as split
   if (_sizeMapEnabled) {
-    split_bits(block, region, level, block_level);
-  } else {
-    set_level(block_left, region, block_level);
+    if (_sizeMapIsBitmap) {
+      split_bits(block, region, level, block_level);
+    } else {
+      set_level(block_left, region, block_level);
+    }
   }
 
   // Mark the block as allocated
   clear_bit(_freeBlocks[region], block_index(block, region, level));
   BUDDY_DBG("cleared block " << block_index(block, region, level) << " at "
-                             << block - _start << " level: " << level
-                             << " region: " << region);
+                             << block - _start << " level: " << (int)level
+                             << " region: " << (int)region);
 
   // Can fit in one block
   if (totalSize <= static_cast<size_t>(_minSize)) {
+    _freeSize -= _minSize;
     return reinterpret_cast<void *>(block);
   }
 
@@ -450,6 +460,8 @@ void *IBuddyAllocator<Config>::allocate(size_t totalSize) {
     }
   }
 
+  _freeSize -= new_size;
+
   return reinterpret_cast<void *>(block_left);
 }
 
@@ -474,7 +486,7 @@ void IBuddyAllocator<Config>::deallocate_single(uintptr_t ptr) {
     BUDDY_DBG("new block index: " << block_idx << " buddy index: " << buddy_idx
                                   << " level: " << level);
 
-    if (_sizeMapEnabled) {
+    if (_sizeMapIsBitmap && _sizeMapEnabled) {
       clear_bit(_sizeMap[region], block_idx);
       BUDDY_DBG("clearing split_idx " << block_idx);
     }
@@ -483,14 +495,16 @@ void IBuddyAllocator<Config>::deallocate_single(uintptr_t ptr) {
   // Mark the block as free and insert it into the free list
   push_back(&_freeList[region][level], reinterpret_cast<double_link *>(ptr));
   set_bit(_freeBlocks[region], block_index(ptr, region, level));
-  BUDDY_DBG("inserting " << ptr - region_start(region) << " at level: " << level
-                         << " marking bit: " << block_index(ptr, region, level)
-                         << " as free");
+  BUDDY_DBG("inserting " << ptr - region_start(region)
+                         << " at level: " << (int)level << " marking bit: "
+                         << block_index(ptr, region, level) << " as free");
 
   // Set the level of the topmost free block
   if (level < _topLevel[region]) {
     _topLevel[region] = level;
   }
+
+  _freeSize += _minSize;
 }
 
 // Deallocates a range of blocks of memory as if they were the smallest block
@@ -518,6 +532,7 @@ void IBuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
                            << " into lazy list");
     push_back(&_lazyList, static_cast<double_link *>(ptr));
     _lazyListSize++;
+    _freeSize += _minSize;
     BUDDY_DBG("lazy list size: " << _lazyListSize);
     return;
   }
@@ -542,7 +557,13 @@ template <typename Config> void IBuddyAllocator<Config>::empty_lazy_list() {
     auto block = reinterpret_cast<uintptr_t>(pop_first(&_lazyList));
     _lazyListSize--;
     deallocate_single(block);
+    // Compensate for the increase size, as the block is just moved, not freed
+    _freeSize -= _minSize;
   }
+}
+
+template <typename Config> size_t IBuddyAllocator<Config>::free_size() {
+  return _freeSize;
 }
 
 // Prints the free list
@@ -588,8 +609,12 @@ template <typename Config> void IBuddyAllocator<Config>::print_bitmaps() {
     }
     std::cout << std::endl;
 
+    if (!_sizeMapEnabled) {
+      continue;
+    }
+
     std::cout << "Split blocks: " << std::endl;
-    if (_sizeMapEnabled) {
+    if (_sizeMapIsBitmap) {
       for (int i = 0; i < Config::sizeBitmapSize; i++) {
         unsigned int block = _sizeMap[r][i];
         for (unsigned int j = 0; j < 8; j++) {
