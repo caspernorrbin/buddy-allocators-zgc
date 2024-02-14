@@ -470,6 +470,10 @@ class SmallSingleFilledAllocatorTests : public CppUnit::TestFixture {
   CPPUNIT_TEST(testClearStartOffset);
   CPPUNIT_TEST(testClearEndOffset);
   CPPUNIT_TEST(testClearStartEndOffset);
+  CPPUNIT_TEST(testClearZeroSize);
+  CPPUNIT_TEST(testClearZeroSizeOffset);
+  CPPUNIT_TEST(testClearSmall);
+  CPPUNIT_TEST(testClearSmallOffset);
   CPPUNIT_TEST(testClearFull);
   CPPUNIT_TEST(testClearFullParts);
   CPPUNIT_TEST(testClearPart);
@@ -534,6 +538,50 @@ public:
     CPPUNIT_ASSERT(allocator->free_size() == _minSize * 3);
     CPPUNIT_ASSERT(allocator->allocate(_minSize * 2) != nullptr);
     CPPUNIT_ASSERT(allocator->allocate(_minSize) != nullptr);
+  }
+
+  void testClearZeroSize() {
+    uint8_t mempool[_maxSize];
+    IBuddyAllocator<SmallSingleConfig> *allocator =
+        get_small_filled_allocator(mempool);
+
+    allocator->deallocate_range(mempool, 0);
+
+    CPPUNIT_ASSERT(allocator->free_size() == 0);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) == nullptr);
+  }
+
+  void testClearZeroSizeOffset() {
+    uint8_t mempool[_maxSize];
+    IBuddyAllocator<SmallSingleConfig> *allocator =
+        get_small_filled_allocator(mempool);
+
+    allocator->deallocate_range(mempool + _minSize / 2, 0);
+
+    CPPUNIT_ASSERT(allocator->free_size() == 0);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) == nullptr);
+  }
+
+  void testClearSmall() {
+    uint8_t mempool[_maxSize];
+    IBuddyAllocator<SmallSingleConfig> *allocator =
+        get_small_filled_allocator(mempool);
+
+    allocator->deallocate_range(mempool + _minSize / 2, _minSize);
+
+    CPPUNIT_ASSERT(allocator->free_size() == 0);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) == nullptr);
+  }
+
+  void testClearSmallOffset() {
+    uint8_t mempool[_maxSize];
+    IBuddyAllocator<SmallSingleConfig> *allocator =
+        get_small_filled_allocator(mempool);
+
+    allocator->deallocate_range(mempool, _minSize / 2);
+
+    CPPUNIT_ASSERT(allocator->free_size() == 0);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) == nullptr);
   }
 
   void testClearFull() {
