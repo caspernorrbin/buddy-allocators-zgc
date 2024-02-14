@@ -467,6 +467,9 @@ class SmallSingleFilledAllocatorTests : public CppUnit::TestFixture {
   CPPUNIT_TEST_SUITE(SmallSingleFilledAllocatorTests);
   CPPUNIT_TEST(testStartFull);
   CPPUNIT_TEST(testClearSingle);
+  CPPUNIT_TEST(testClearStartOffset);
+  CPPUNIT_TEST(testClearEndOffset);
+  CPPUNIT_TEST(testClearStartEndOffset);
   CPPUNIT_TEST(testClearFull);
   CPPUNIT_TEST(testClearFullParts);
   CPPUNIT_TEST(testClearPart);
@@ -495,6 +498,41 @@ public:
 
     CPPUNIT_ASSERT(allocator->free_size() == _minSize);
     CPPUNIT_ASSERT(allocator->allocate(_minSize * 2) == nullptr);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) != nullptr);
+  }
+
+  void testClearStartOffset() {
+    uint8_t mempool[_maxSize];
+    IBuddyAllocator<SmallSingleConfig> *allocator =
+        get_small_filled_allocator(mempool);
+
+    allocator->deallocate_range(mempool + 7, _minSize * 4 - 7);
+
+    CPPUNIT_ASSERT(allocator->free_size() == _minSize * 3);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize * 2) != nullptr);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) != nullptr);
+  }
+
+  void testClearEndOffset() {
+    uint8_t mempool[_maxSize];
+    IBuddyAllocator<SmallSingleConfig> *allocator =
+        get_small_filled_allocator(mempool);
+
+    allocator->deallocate_range(mempool, _minSize * 4 + 7);
+
+    CPPUNIT_ASSERT(allocator->free_size() == _minSize * 4);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize * 4) != nullptr);
+  }
+
+  void testClearStartEndOffset() {
+    uint8_t mempool[_maxSize];
+    IBuddyAllocator<SmallSingleConfig> *allocator =
+        get_small_filled_allocator(mempool);
+
+    allocator->deallocate_range(mempool + _minSize / 2, _minSize * 4);
+
+    CPPUNIT_ASSERT(allocator->free_size() == _minSize * 3);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize * 2) != nullptr);
     CPPUNIT_ASSERT(allocator->allocate(_minSize) != nullptr);
   }
 

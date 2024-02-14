@@ -511,7 +511,10 @@ void IBuddyAllocator<Config>::deallocate_single(uintptr_t ptr) {
 template <typename Config>
 void IBuddyAllocator<Config>::deallocate_range(void *ptr, size_t size) {
   const auto start = reinterpret_cast<uintptr_t>(ptr);
-  for (uintptr_t i = start; i < start + size;
+  const uintptr_t aligned_start =
+      align_left(start + _minSize - 1, _numLevels - 1);
+  const uintptr_t end = align_left(start + size, _numLevels - 1);
+  for (uintptr_t i = aligned_start; i < end;
        i += size_of_level(_numLevels - 1)) {
 
     BUDDY_DBG("deallocating block at " << i - _start);
