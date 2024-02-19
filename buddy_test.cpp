@@ -474,6 +474,8 @@ class SmallSingleFilledAllocatorTests : public CppUnit::TestFixture {
   CPPUNIT_TEST(testClearZeroSizeOffset);
   CPPUNIT_TEST(testClearSmall);
   CPPUNIT_TEST(testClearSmallOffset);
+  CPPUNIT_TEST(testClearFill);
+  CPPUNIT_TEST(testClearFillTwice);
   CPPUNIT_TEST(testClearFull);
   CPPUNIT_TEST(testClearFullParts);
   CPPUNIT_TEST(testClearPart);
@@ -579,6 +581,58 @@ public:
         get_small_filled_allocator(mempool);
 
     allocator->deallocate_range(mempool, _minSize / 2);
+
+    CPPUNIT_ASSERT(allocator->free_size() == 0);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) == nullptr);
+  }
+
+  void testClearFill() {
+    uint8_t mempool[_maxSize];
+    IBuddyAllocator<SmallSingleConfig> *allocator =
+        get_small_filled_allocator(mempool);
+
+    allocator->deallocate_range(mempool, _minSize);
+
+    CPPUNIT_ASSERT(allocator->free_size() == _minSize);
+
+    void *p = allocator->allocate(_minSize);
+    CPPUNIT_ASSERT(p != nullptr);
+
+    allocator->fill();
+
+    CPPUNIT_ASSERT(allocator->free_size() == 0);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) == nullptr);
+
+    allocator->deallocate_range(mempool, _maxSize);
+
+    CPPUNIT_ASSERT(allocator->free_size() == _maxSize);
+    CPPUNIT_ASSERT(allocator->allocate(_maxSize) != nullptr);
+  }
+
+  void testClearFillTwice() {
+    uint8_t mempool[_maxSize];
+    IBuddyAllocator<SmallSingleConfig> *allocator =
+        get_small_filled_allocator(mempool);
+
+    allocator->deallocate_range(mempool, _maxSize);
+
+    CPPUNIT_ASSERT(allocator->free_size() == _maxSize);
+
+    void *p = allocator->allocate(_maxSize);
+    CPPUNIT_ASSERT(p != nullptr);
+
+    allocator->fill();
+
+    CPPUNIT_ASSERT(allocator->free_size() == 0);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) == nullptr);
+
+    allocator->deallocate_range(p, _minSize);
+
+    CPPUNIT_ASSERT(allocator->free_size() == _minSize);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize * 2) == nullptr);
+    CPPUNIT_ASSERT(allocator->allocate(_minSize) != nullptr);
+
+    allocator->fill();
 
     CPPUNIT_ASSERT(allocator->free_size() == 0);
     CPPUNIT_ASSERT(allocator->allocate(_minSize) == nullptr);

@@ -5,10 +5,10 @@
 #include <cstdint>
 
 template <unsigned int MIN_BLOCK_SIZE_LOG2, unsigned int MAX_BLOCK_SIZE_LOG2,
-          int NUM_REGIONS, bool USE_SIZEMAP, int SIZE_BITS>
+          int NUM_REGIONS, bool USE_SIZEMAP, size_t SIZE_BITS>
 struct IBuddyConfig {
-  static const int minBlockSizeLog2 = MIN_BLOCK_SIZE_LOG2;
-  static const int maxBlockSizeLog2 = MAX_BLOCK_SIZE_LOG2;
+  static const size_t minBlockSizeLog2 = MIN_BLOCK_SIZE_LOG2;
+  static const size_t maxBlockSizeLog2 = MAX_BLOCK_SIZE_LOG2;
   static const size_t minBlockSize = 1U << MIN_BLOCK_SIZE_LOG2;
   static const size_t maxBlockSize = 1U << MAX_BLOCK_SIZE_LOG2;
   static const unsigned char numLevels =
@@ -16,7 +16,7 @@ struct IBuddyConfig {
   static const int numRegions = NUM_REGIONS;
   static const bool useSizeMap = USE_SIZEMAP;
   static const int allocedBitmapSize = (1U << (numLevels)) / 8;
-  static const int sizeBits = SIZE_BITS;
+  static const size_t sizeBits = SIZE_BITS;
   static const int sizeBitmapSize =
       !USE_SIZEMAP       ? 0
       : (SIZE_BITS == 0) ? (1U << (numLevels - 1U)) / 8
@@ -46,12 +46,14 @@ public:
   void deallocate_range(void *ptr, size_t size);
   void empty_lazy_list();
   size_t free_size();
+  void fill();
 
   void print_free_list();
   void print_bitmaps();
 
 private:
   void init_bitmaps(bool startFull);
+  void init_free_lists();
   uintptr_t region_start(uint8_t region);
   unsigned int size_of_level(uint8_t level);
   unsigned int index_in_level(uintptr_t ptr, uint8_t region, uint8_t level);
@@ -76,11 +78,11 @@ private:
 
   const uint8_t _numRegions = Config::numRegions;
   const uint8_t _numLevels = Config::numLevels;
-  const int _minBlockSizeLog2 = Config::minBlockSizeLog2;
-  const int _maxBlockSizeLog2 = Config::maxBlockSizeLog2;
+  const size_t _minBlockSizeLog2 = Config::minBlockSizeLog2;
+  const size_t _maxBlockSizeLog2 = Config::maxBlockSizeLog2;
   const size_t _minSize = Config::minBlockSize;
   const size_t _maxSize = Config::maxBlockSize;
-  const int _sizeBits = Config::sizeBits;
+  const size_t _sizeBits = Config::sizeBits;
   const bool _sizeMapEnabled = Config::useSizeMap;
   const bool _sizeMapIsBitmap = Config::sizeBits == 0;
 
