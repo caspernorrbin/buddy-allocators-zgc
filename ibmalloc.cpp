@@ -3,8 +3,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <errno.h>
 
-using Config = IBuddyConfig<4, 27, 1, 0>;
+using Config = IBuddyConfig<4, 27, 1, true, 0>;
 
 // uint8_t mempool[1 << MAX_SIZE_LOG2];
 // uint8_t allocatorpool[sizeof(IBuddyAllocator<Config>)];
@@ -20,7 +21,11 @@ void *malloc(size_t size) {
     init_buddy();
   }
 
-  return allocator->allocate(size);
+  void *p = allocator->allocate(size);
+  if (p == nullptr) {
+    errno = ENOMEM;
+  }
+  return p;
 }
 
 void *calloc(size_t num, size_t size) {
@@ -29,6 +34,10 @@ void *calloc(size_t num, size_t size) {
   }
 
   void *p = allocator->allocate(num * size);
+  if (p == nullptr) {
+    errno = ENOMEM;
+    return nullptr;
+  }
   memset(p, 0, num * size);
   return p;
 }
@@ -40,6 +49,7 @@ void *realloc(void *ptr, size_t size) {
 
   void *p = allocator->allocate(size);
   if (p == nullptr) {
+    errno = ENOMEM;
     return nullptr;
   }
 
