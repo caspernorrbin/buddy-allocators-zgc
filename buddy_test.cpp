@@ -1,4 +1,8 @@
+#include "buddy_config.hpp"
+#include "buddy_instantiations.hpp"
 #include "ibuddy.hpp"
+#include "ibuddy_instantiations.hpp"
+#include "buddy_allocator.hpp"
 #include <cppunit/TestAssert.h>
 #include <cppunit/TestFixture.h>
 #include <cppunit/TestSuite.h>
@@ -8,10 +12,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
-
-using SmallSingleConfig = IBuddyConfig<4, 8, 1, true, 0>;
-using SmallDoubleConfig = IBuddyConfig<4, 8, 2, true, 4>;
-using LargeQuadConfig = IBuddyConfig<4, 21, 4, true, 0>;
 
 class SmallSingleAllocatorTests : public CppUnit::TestFixture {
   CPPUNIT_TEST_SUITE(SmallSingleAllocatorTests);

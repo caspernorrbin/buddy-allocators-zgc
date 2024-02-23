@@ -1,3 +1,4 @@
+#include "buddy_config.hpp"
 #include "ibuddy.hpp"
 
 #include <cstdint>
@@ -5,15 +6,14 @@
 #include <cstring>
 #include <errno.h>
 
-using Config = IBuddyConfig<4, 27, 1, true, 0>;
-
 // uint8_t mempool[1 << MAX_SIZE_LOG2];
-// uint8_t allocatorpool[sizeof(IBuddyAllocator<Config>)];
-static IBuddyAllocator<Config> *allocator = nullptr;
+// uint8_t allocatorpool[sizeof(IBuddyAllocator<MallocConfig>)];
+static IBuddyAllocator<MallocConfig> *allocator = nullptr;
 
 extern "C" {
 void init_buddy() {
-  allocator = IBuddyAllocator<Config>::create(nullptr, nullptr, 31, false);
+  allocator =
+      IBuddyAllocator<MallocConfig>::create(nullptr, nullptr, 31, false);
 }
 
 void *malloc(size_t size) {

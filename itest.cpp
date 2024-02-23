@@ -12,7 +12,7 @@ int main() {
   const bool useSizeMap = true;
 
   using Config =
-      IBuddyConfig<minSizeLog2, maxSizeLog2, numRegions, useSizeMap, sizeBits>;
+      BuddyConfig<minSizeLog2, maxSizeLog2, numRegions, useSizeMap, sizeBits>;
 
   unsigned char mempool[(1U << maxSizeLog2) * numRegions];
   IBuddyAllocator<Config> *allocator = IBuddyAllocator<Config>::create(

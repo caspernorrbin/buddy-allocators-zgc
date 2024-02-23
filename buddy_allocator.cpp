@@ -1,0 +1,400 @@
+#include "buddy_allocator.hpp"
+#include "buddy_helper.hpp"
+#include "buddy_instantiations.hpp"
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <sys/mman.h>
+
+#ifdef DEBUG
+#define BUDDY_DBG(x) std::cout << x << std::endl;
+#else
+#define BUDDY_DBG(x)                                                           \
+  do {                                                                         \
+  } while (0)
+#endif
+
+template <typename Config>
+inline uintptr_t BuddyAllocator<Config>::region_start(uint8_t region) {
+  return _start + (region << _maxBlockSizeLog2);
+}
+
+// Returns the size of a block at the given level
+template <typename Config>
+inline unsigned int BuddyAllocator<Config>::size_of_level(uint8_t level) {
+  return _maxSize >> level;
+}
+
+template <typename Config>
+inline unsigned int BuddyAllocator<Config>::index_in_level(uintptr_t ptr,
+                                                           uint8_t region,
+                                                           uint8_t level) {
+  // return (ptr - region_start(region)) / size_of_level(level);
+  return (ptr - region_start(region)) >>
+         (_numLevels - level - 1 + _minBlockSizeLog2);
+}
+
+template <typename Config>
+inline unsigned int BuddyAllocator<Config>::index_of_level(uint8_t level) {
+  return (1U << level) - 1;
+}
+
+template <typename Config>
+unsigned int BuddyAllocator<Config>::block_index(uintptr_t ptr, uint8_t region,
+                                                 uint8_t level) {
+  return index_of_level(level) + index_in_level(ptr, region, level);
+}
+
+template <typename Config>
+unsigned int BuddyAllocator<Config>::buddy_index(uintptr_t ptr, uint8_t region,
+                                                 uint8_t level) {
+  int block_idx = block_index(ptr, region, level);
+  if (block_idx % 2 == 0) {
+    return block_idx - 1;
+  }
+  return block_idx + 1;
+  // return (block_idx + 1) ^ 1;
+}
+
+template <typename Config>
+uint8_t BuddyAllocator<Config>::get_level(uintptr_t ptr) {
+  uint8_t region = get_region(ptr);
+  if (!_sizeMapIsBitmap) {
+    int index = (ptr - region_start(region)) / _minSize;
+
+    if (_sizeBits == 8) {
+      return _sizeMap[region][index];
+    }
+
+    const int byteIndex = index / 2;
+    const int bitOffset = (index % 2) * 4;
+
+    BUDDY_DBG("getting level at " << index << " byte index: " << byteIndex
+                                  << " bit offset: " << bitOffset);
+
+    return (_sizeMap[region][byteIndex] >> bitOffset) & 0xF;
+  }
+
+  for (uint8_t i = _numLevels - 1; i > 0; i--) {
+    // BUDDY_DBG("block_index: " << block_index(ptr, region, i - 1));
+    if (BuddyHelper::bit_is_set(_sizeMap[region],
+                                block_index(ptr, region, i - 1))) {
+      BUDDY_DBG("level is: " << (int)i);
+      return i;
+    }
+  }
+  return 0;
+}
+
+template <typename Config>
+inline uint8_t BuddyAllocator<Config>::get_region(uintptr_t ptr) {
+  return (ptr - _start) >> Config::maxBlockSizeLog2;
+  // return (ptr - _start) / Config::maxBlockSize;
+}
+
+// Returns the number of blocks needed to fill the given size
+template <typename Config>
+unsigned int BuddyAllocator<Config>::num_blocks(size_t size, uint8_t level) {
+  return BuddyHelper::round_up_pow2(size) / size_of_level(level);
+  // return size / size_of_level(level) + (size % size_of_level(level) != 0);
+}
+
+// Returns the number of blocks needed to fill the given size
+// template <typename Config>
+// unsigned int BuddyAllocator<Config>::num_blocks(size_t size, uint8_t level)
+// { return size / size_of_level(level) + (size % size_of_level(level) != 0);
+// }
+
+// Returns the buddy of the given block
+template <typename Config>
+uintptr_t BuddyAllocator<Config>::get_buddy(uintptr_t ptr, uint8_t level) {
+  if (level == 0) {
+    return ptr;
+  }
+  // int block_idx = block_index(p, level);
+  uint8_t region = get_region(ptr);
+  int buddy_idx = buddy_index(ptr, region, level);
+  uintptr_t buddy =
+      (region_start(region) +
+       size_of_level(level) * (buddy_idx - index_of_level(level)));
+  return buddy;
+}
+
+// Aligns the given pointer to the left-most pointer of the block
+template <typename Config>
+uintptr_t BuddyAllocator<Config>::align_left(uintptr_t ptr, uint8_t level) {
+  uint8_t region = get_region(ptr);
+  return (region_start(region) +
+          size_of_level(level) * index_in_level(ptr, region, level));
+}
+
+// Returns the size of the allocated block
+template <typename Config>
+size_t BuddyAllocator<Config>::get_alloc_size(uintptr_t ptr) {
+  return size_of_level(get_level(ptr));
+}
+
+// Returns the level of the smallest block that can fit the given size
+template <typename Config>
+int BuddyAllocator<Config>::find_smallest_block_level(size_t size) {
+  for (size_t i = _minBlockSizeLog2; i <= _maxBlockSizeLog2; i++) {
+    if (size <= 1U << i) {
+      BUDDY_DBG("level: " << _maxBlockSizeLog2 - i << " size: " << (1 << i));
+      return _maxBlockSizeLog2 - i;
+    }
+  }
+  return -1;
+}
+
+// Sets the level of the given block in the size map
+template <typename Config>
+void BuddyAllocator<Config>::set_level(uintptr_t ptr, uint8_t region,
+                                       uint8_t level) {
+  const unsigned int index = (ptr - region_start(region)) / _minSize;
+  if (_sizeBits == 8) {
+    _sizeMap[region][index] = level;
+    return;
+  }
+
+  const unsigned int byteIndex = index / 2;
+  const unsigned int bitOffset = (index % 2) * 4;
+  BUDDY_DBG("setting level at " << index << " byte index: " << byteIndex
+                                << " bit offset: " << bitOffset);
+
+  _sizeMap[region][byteIndex] &=
+      ~(0xFU << bitOffset); // Clear the bits for the current level
+  _sizeMap[region][byteIndex] |=
+      (level << bitOffset); // Set the bits for the new level
+}
+
+// Marks blocks as split above the given level
+template <typename Config>
+void BuddyAllocator<Config>::split_bits(uintptr_t ptr, uint8_t region,
+                                        uint8_t level_start,
+                                        uint8_t level_end) {
+  BUDDY_DBG("splitting bits from " << (int)level_start << " to "
+                                   << (int)level_end << " in region "
+                                   << region);
+  for (uint8_t i = level_start; i < level_end && i < _numLevels - 1; i++) {
+    BUDDY_DBG("splitting bit at " << block_index(ptr, region, i));
+    BuddyHelper::set_bit(_sizeMap[region], block_index(ptr, region, i));
+  }
+}
+
+template <typename Config> void BuddyAllocator<Config>::init_free_lists() {
+  for (int r = 0; r < Config::numRegions; r++) {
+    for (int l = 0; l < Config::numLevels; l++) {
+      _freeList[r][l] = {&_freeList[r][l], &_freeList[r][l]};
+    }
+  }
+}
+
+template <typename Config>
+BuddyAllocator<Config>::BuddyAllocator(void *start, int lazyThreshold,
+                                       bool startFull) {
+
+  static_assert(Config::numLevels > 0,
+                "Number of levels must be greater than 0");
+  static_assert(Config::minBlockSizeLog2 >= 4,
+                "Minimum block size must be greater than or equal to 4");
+  static_assert(Config::maxBlockSizeLog2 > Config::minBlockSizeLog2,
+                "Maximum block size must be greater than minimum block size");
+  static_assert(Config::sizeBits == 0 || Config::sizeBits == 4 ||
+                    Config::sizeBits == 8,
+                "Size bits must be 0, 4, or 8");
+  static_assert(!(Config::sizeBits == 4 &&
+                  Config::maxBlockSizeLog2 - Config::minBlockSizeLog2 > 16),
+                "Combination of sizeBits = 4 and maxBlockSizeLog2 - "
+                "minBlockSizeLog2 > 16 is not allowed");
+
+  if (start == nullptr) {
+    start = mmap(nullptr, (Config::numRegions * Config::maxBlockSize),
+                 PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+    if (start == MAP_FAILED) {
+      BUDDY_DBG("mmap failed");
+      exit(1);
+    }
+  }
+
+  // Initialize free lists
+  init_free_lists();
+
+  _start = reinterpret_cast<uintptr_t>(start);
+  _totalSize = Config::numRegions * Config::maxBlockSize;
+  _freeSize = startFull ? 0 : _totalSize;
+  _lazyThreshold = lazyThreshold;
+
+  _lazyList = {&_lazyList, &_lazyList};
+}
+
+// Returns the free size
+template <typename Config> size_t BuddyAllocator<Config>::free_size() {
+  return _freeSize;
+}
+
+// Allocates a block of memory of the given size
+template <typename Config>
+void *BuddyAllocator<Config>::allocate(size_t totalSize) {
+  // Allocation too large
+  if (totalSize > static_cast<size_t>(_maxSize)) {
+    BUDDY_DBG("Requested size is too large");
+    return nullptr;
+  }
+
+  // Allocate from lazy list if possible
+  if (_lazyListSize > 0 &&
+      totalSize <= static_cast<size_t>(_minSize)) {
+    BUDDY_DBG("Allocating from lazy list");
+    void *block = BuddyHelper::pop_first(&_lazyList);
+    BUDDY_DBG("allocated block "
+              << block_index(reinterpret_cast<uintptr_t>(block),
+                             get_region(reinterpret_cast<uintptr_t>(block)),
+                             _numLevels - 1)
+              << " at " << reinterpret_cast<uintptr_t>(block) - _start
+              << " level: " << _numLevels - 1);
+    _lazyListSize--;
+    _freeSize -= _minSize;
+
+    return block;
+  }
+
+  return allocate_internal(totalSize);
+}
+
+// Deallocates a block of memory of the given size
+template <typename Config>
+void BuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
+  if (size <= static_cast<size_t>(_minSize) && _lazyListSize < _lazyThreshold) {
+    BUDDY_DBG("inserting " << reinterpret_cast<uintptr_t>(ptr) - _start
+                           << " with index "
+                           << block_index(
+                                  reinterpret_cast<uintptr_t>(ptr),
+                                  get_region(reinterpret_cast<uintptr_t>(ptr)),
+                                  _numLevels - 1)
+                           << " into lazy list");
+    BuddyHelper::push_back(&_lazyList, static_cast<double_link *>(ptr));
+    _lazyListSize++;
+    _freeSize += _minSize;
+    BUDDY_DBG("lazy list size: " << _lazyListSize);
+    return;
+  }
+
+  return deallocate_internal(ptr, BuddyHelper::round_up_pow2(size));
+}
+
+// Deallocates a block of memory
+template <typename Config> void BuddyAllocator<Config>::deallocate(void *ptr) {
+  if (ptr == nullptr || reinterpret_cast<uintptr_t>(ptr) < _start ||
+      reinterpret_cast<uintptr_t>(ptr) >= _start + _numRegions * _maxSize) {
+    return;
+  }
+
+  size_t size = get_alloc_size(reinterpret_cast<uintptr_t>(ptr));
+  BUDDY_DBG("deallocate size: " << size);
+  return deallocate(ptr, size);
+}
+
+// Empties the lazy list, inserting blocks back into the free list
+template <typename Config> void BuddyAllocator<Config>::empty_lazy_list() {
+  while (_lazyListSize > 0) {
+    void *block = BuddyHelper::pop_first(&_lazyList);
+    _lazyListSize--;
+    deallocate_range(block, _minSize);
+    // deallocate_single(block);
+    // Compensate for the increase size, as the block is just moved, not freed
+    _freeSize -= _minSize;
+  }
+}
+
+template <typename Config>
+void BuddyAllocator<Config>::push_free_list(uintptr_t ptr, uint8_t region,
+                                            uint8_t level) {
+  auto *block = reinterpret_cast<double_link *>(ptr);
+  double_link *head = &_freeList[region][level];
+  BuddyHelper::push_back(head, block);
+}
+
+template <typename Config>
+bool BuddyAllocator<Config>::free_list_empty(uint8_t region, uint8_t level) {
+  return BuddyHelper::list_empty(&_freeList[region][level]);
+}
+
+template <typename Config>
+uintptr_t BuddyAllocator<Config>::pop_free_list(uint8_t region, uint8_t level) {
+  double_link *block = BuddyHelper::pop_first(&_freeList[region][level]);
+  return reinterpret_cast<uintptr_t>(block);
+}
+
+// Prints the free list
+template <typename Config> void BuddyAllocator<Config>::print_free_list() {
+  for (int r = 0; r < _numRegions; r++) {
+    for (size_t i = 0; i < static_cast<size_t>(_numLevels); i++) {
+      std::cout << "Free list " << i << "(" << (1U << (_maxBlockSizeLog2 - i))
+                << "): ";
+      for (double_link *link = _freeList[r][i].next; link != &_freeList[r][i];
+           link = link->next) {
+        std::cout << reinterpret_cast<uintptr_t>(
+                         reinterpret_cast<uintptr_t>(link) - _start)
+                  << " ";
+      }
+      std::cout << std::endl;
+    }
+    std::cout << "Lazy list size: " << _lazyListSize << std::endl;
+  }
+}
+
+// Prints the bitmaps
+template <typename Config> void BuddyAllocator<Config>::print_bitmaps() {
+  for (int r = 0; r < _numRegions; r++) {
+    std::cout << "Allocated blocks: " << std::endl;
+    int bitsPerLine = 1;
+    int bitsPrinted = 0;
+    int spaces = 32;
+    for (int i = 0; i < Config::allocedBitmapSize; i++) {
+      unsigned int block = _freeBlocks[r][i];
+      for (unsigned int j = 0; j < 8; j++) {
+        std::cout << ((block >> j) & 1U);
+        for (int k = 0; k < spaces - 1; k++) {
+          std::cout << " ";
+        }
+        bitsPrinted++;
+        if (bitsPrinted == bitsPerLine) {
+          std::cout << std::endl;
+          bitsPerLine *= 2;
+          bitsPrinted = 0;
+          spaces /= 2;
+        }
+      }
+    }
+    std::cout << std::endl;
+
+    if (!_sizeMapEnabled) {
+      continue;
+    }
+
+    std::cout << "Split blocks: " << std::endl;
+    if (_sizeMapIsBitmap) {
+      for (int i = 0; i < Config::sizeBitmapSize; i++) {
+        unsigned int block = _sizeMap[r][i];
+        for (unsigned int j = 0; j < 8; j++) {
+          std::cout << ((block >> j) & 1U) << " ";
+        }
+      }
+      std::cout << std::endl;
+    } else {
+      for (int i = 0; i < Config::sizeBitmapSize; i++) {
+        unsigned int block = _sizeMap[r][i];
+        if (Config::sizeBits == 8) {
+          std::cout << size_of_level(block) << " ";
+        } else {
+          for (unsigned int j = 0; j < 2; j++) {
+            std::cout << size_of_level((block >> (j * 4)) & 0xFU) << " ";
+          }
+        }
+      }
+      std::cout << std::endl;
+    }
+  }
+}
