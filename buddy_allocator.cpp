@@ -281,7 +281,7 @@ void BuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
     return;
   }
 
-  return deallocate_internal(ptr, BuddyHelper::round_up_pow2(size));
+  deallocate_internal(ptr, BuddyHelper::round_up_pow2(size));
 }
 
 // Deallocates a block of memory

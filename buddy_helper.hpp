@@ -52,18 +52,9 @@ public:
     bitmap[index / 8] &= ~(1U << (static_cast<unsigned int>(index) % 8));
   }
 
-  // static void flip_bit(unsigned char *bitmap, int index) {
-  //   bitmap[index / 8] ^= (1U << (static_cast<unsigned int>(index) % 8));
-  // }
-
-  // static int map_index(int index) {
-  //   // if (index == 0) {
-  //   //   return 0;
-  //   // } else {
-  //   //   return (index - 1) / 2 + 1;
-  //   // }
-  //   return (index - 1) / 2;
-  // }
+  static void flip_bit(unsigned char *bitmap, int index) {
+    bitmap[index / 8] ^= (1U << (static_cast<unsigned int>(index) % 8));
+  }
 
   static size_t round_up_pow2(size_t size) {
     if (size == 0) {

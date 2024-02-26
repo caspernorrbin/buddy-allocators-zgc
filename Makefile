@@ -1,4 +1,4 @@
-main: ibuddy
+main: bbuddy_debug
 
 CPP_COMPILER = g++
 CPP_FLAGS = -Wall -Wextra -std=c++14 -pedantic -g
@@ -16,15 +16,15 @@ ilib: buddy_allocator.o ibuddy.o ibmalloc.o
 	$(CPP_COMPILER) $(CPP_FLAGS) -shared -o $(SHARED_LIB) buddy_allocator.o ibuddy.o ibmalloc.o
 	cp libbuddy.so ~/ioopm/inluppar/inlupp1/libbuddy.so
 
-blib: buddy_allocator.o binary_buddy.o bmalloc.o
-	$(CPP_COMPILER) $(CPP_FLAGS) -shared -o $(SHARED_LIB) buddy_allocator.o binary_buddy.o bmalloc.o
+blib: buddy_allocator.o bbuddy.o bmalloc.o
+	$(CPP_COMPILER) $(CPP_FLAGS) -shared -o $(SHARED_LIB) buddy_allocator.o bbuddy.o bmalloc.o
 	cp libbuddy.so ~/ioopm/inluppar/inlupp1/libbuddy.so
 
-buddy: test.o bbuddy.o buddy_allocator.o
-	$(CPP_COMPILER) $(CPP_FLAGS) -o buddy.out test.o bbuddy.o buddy_allocator.o
+bbuddy: btest.o bbuddy.o buddy_allocator.o
+	$(CPP_COMPILER) $(CPP_FLAGS) -o buddy.out btest.o bbuddy.o buddy_allocator.o
 
-buddy_debug: test_d.o bbuddy.o buddy_allocator.o
-	$(CPP_COMPILER) $(CPP_FLAGS) -DDEBUG -o buddy.out test.o bbuddy.o buddy_allocator.o
+bbuddy_debug: btest_d.o bbuddy_d.o buddy_allocator.o
+	$(CPP_COMPILER) $(CPP_FLAGS) -DDEBUG -o buddy.out btest.o bbuddy.o buddy_allocator.o
 
 ibuddy: itest.o ibuddy.o buddy_allocator.o
 	$(CPP_COMPILER) $(CPP_FLAGS) -o buddy.out itest.o ibuddy.o buddy_allocator.o
@@ -32,8 +32,11 @@ ibuddy: itest.o ibuddy.o buddy_allocator.o
 ibuddy_debug: itest_d.o ibuddy_d.o buddy_allocator.o
 	$(CPP_COMPILER) $(CPP_FLAGS) -DDEBUG -o buddy.out itest.o ibuddy.o buddy_allocator.o
 
-test: buddy_test.o ibuddy.o buddy_allocator.o
-	$(CPP_COMPILER) $(CPP_FLAGS) -o test.out buddy_test.o ibuddy.o buddy_allocator.o $(CPP_UNIT)
+btest: bbuddy_test.o bbuddy.o buddy_allocator.o
+	$(CPP_COMPILER) $(CPP_FLAGS) -o btest.out bbuddy_test.o bbuddy.o buddy_allocator.o $(CPP_UNIT)
+
+itest: ibuddy_test.o ibuddy.o buddy_allocator.o
+	$(CPP_COMPILER) $(CPP_FLAGS) -o itest.out ibuddy_test.o ibuddy.o buddy_allocator.o $(CPP_UNIT)
 
 profile:
 	$(CPP_COMPILER) $(CPP_FAST_FLAGS) -pg ibuddy.cpp buddy_test.cpp -c
@@ -43,4 +46,4 @@ profile:
 	rm gmon.out $@
 
 clean:
-	rm -rf *.o test.out buddy.out $(SHARED_LIB)
+	rm -rf *.o *.out $(SHARED_LIB)
