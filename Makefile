@@ -9,8 +9,12 @@ CPP_UNIT = -lcppunit
 %_d.o: %.cpp
 	$(CPP_COMPILER) $(CPP_FLAGS) -DDEBUG -fPIC -c $<
 
+%_f.o: %.cpp
+	$(CPP_COMPILER) $(CPP_FAST_FLAGS) -fPIC -c $<
+
 %.o: %.cpp
 	$(CPP_COMPILER) $(CPP_FLAGS) -fPIC -c $<
+
 
 ilib: buddy_allocator.o ibuddy.o ibmalloc.o
 	$(CPP_COMPILER) $(CPP_FLAGS) -shared -o $(SHARED_LIB) buddy_allocator.o ibuddy.o ibmalloc.o
@@ -37,6 +41,9 @@ btest: bbuddy_test.o bbuddy.o buddy_allocator.o
 
 itest: ibuddy_test.o ibuddy.o buddy_allocator.o
 	$(CPP_COMPILER) $(CPP_FLAGS) -o itest.out ibuddy_test.o ibuddy.o buddy_allocator.o $(CPP_UNIT)
+
+benchmark_threads: benchmark_threads_f.o ibuddy_f.o bbuddy_f.o buddy_allocator_f.o
+	$(CPP_COMPILER) $(CPP_FAST_FLAGS) -o benchmark_threads.out benchmark_threads.o ibuddy.o bbuddy.o buddy_allocator.o
 
 profile:
 	$(CPP_COMPILER) $(CPP_FAST_FLAGS) -pg ibuddy.cpp buddy_test.cpp -c

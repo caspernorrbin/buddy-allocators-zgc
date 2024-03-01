@@ -26,6 +26,6 @@ using ZConfig = BuddyConfig<4, 18, 8, true, 4>;
 using SmallSingleConfig = BuddyConfig<4, 8, 1, true, 0>;
 using SmallDoubleConfig = BuddyConfig<4, 8, 2, true, 4>;
 using LargeQuadConfig = BuddyConfig<4, 21, 4, true, 0>;
-using MallocConfig = BuddyConfig<4, 27, 1, true, 0>;
+using MallocConfig = BuddyConfig<4, 25, 8, true, 0>;
 
 #endif // BUDDY_CONFIG_HPP_
