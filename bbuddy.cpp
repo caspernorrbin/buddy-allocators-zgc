@@ -18,31 +18,10 @@
 
 template <typename Config>
 void BinaryBuddyAllocator<Config>::init_bitmaps(bool startFull) {
-  for (int i = 0; i < Config::numRegions; i++) {
-    for (int j = 0; j < Config::allocedBitmapSize; j++) {
-      BuddyAllocator<Config>::_freeBlocks[i][j] = 0x0;
-    }
-  }
+  unsigned char freeBlocksPattern = 0x0;                 // 0x55 = 01010101
+  unsigned char sizeMapPattern = startFull ? 0xFF : 0x0; // 0xFF = 11111111
 
-  if (!BuddyAllocator<Config>::_sizeMapEnabled) {
-    return;
-  }
-
-  if (Config::sizeBits == 0) { // Bitmap indicates split blocks
-    if (startFull) {
-      for (int i = 0; i < Config::numRegions; i++) {
-        for (int j = 0; j < Config::sizeBitmapSize; j++) {
-          BuddyAllocator<Config>::_sizeMap[i][j] = 0xFF; // 11111111
-        }
-      }
-    } else {
-      for (int i = 0; i < Config::numRegions; i++) {
-        for (int j = 0; j < Config::sizeBitmapSize; j++) {
-          BuddyAllocator<Config>::_sizeMap[i][j] = 0x00; // 00000000
-        }
-      }
-    }
-  }
+  BuddyAllocator<Config>::set_bitmaps(freeBlocksPattern, sizeMapPattern);
 }
 
 template <typename Config>
@@ -93,9 +72,9 @@ void *BinaryBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
   uint8_t r = 0;
   bool found = false;
 
-  const int start_block_level =
+  const uint8_t start_block_level =
       BuddyAllocator<Config>::find_smallest_block_level(totalSize);
-  int block_level = start_block_level;
+  uint8_t block_level = start_block_level;
 
   for (r = 0; r < BuddyAllocator<Config>::_numRegions; r++) {
     block_level = start_block_level;
@@ -116,15 +95,14 @@ void *BinaryBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
               BuddyAllocator<Config>::block_index(block, r, block_level);
           if (BuddyAllocator<Config>::_sizeMapIsBitmap &&
               BuddyAllocator<Config>::_sizeMapEnabled) {
-            BuddyHelper::set_bit(BuddyAllocator<Config>::_sizeMap[r],
-                                 block_idx);
+            BuddyAllocator<Config>::set_split_block(r, block_idx, true);
             BUDDY_DBG("setting split_idx " << block_idx);
           }
 
           // Mark block as allocated
           if (block_level > 0) {
-            BuddyHelper::flip_bit(BuddyAllocator<Config>::_freeBlocks[r],
-                                  map_index(block_idx));
+            BuddyAllocator<Config>::flip_allocated_block(r,
+                                                         map_index(block_idx));
             BUDDY_DBG("flipping bit: " << map_index(block_idx));
           }
 
@@ -155,9 +133,8 @@ void *BinaryBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
   const uintptr_t block = BuddyAllocator<Config>::pop_free_list(r, block_level);
 
   // Mark block as allocated
-  BuddyHelper::flip_bit(
-      BuddyAllocator<Config>::_freeBlocks[r],
-      map_index(BuddyAllocator<Config>::block_index(block, r, block_level)));
+  BuddyAllocator<Config>::flip_allocated_block(
+      r, map_index(BuddyAllocator<Config>::block_index(block, r, block_level)));
   BUDDY_DBG("flipping final bit: " << map_index(
                 BuddyAllocator<Config>::block_index(block, r, block_level)));
 
@@ -181,17 +158,16 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
   // Mark block as free
   BUDDY_DBG("flipping bit: " << map_index(
                 BuddyAllocator<Config>::block_index(block, region, level)));
-  BuddyHelper::flip_bit(
-      BuddyAllocator<Config>::_freeBlocks[region],
+  BuddyAllocator<Config>::flip_allocated_block(
+      region,
       map_index(BuddyAllocator<Config>::block_index(block, region, level)));
 
   uintptr_t buddy = BuddyAllocator<Config>::get_buddy(
       block, BuddyAllocator<Config>::get_level(block));
 
   // Merge until buddy is no longer free
-  while (level > 0 &&
-         !BuddyHelper::bit_is_set(BuddyAllocator<Config>::_freeBlocks[region],
-                                  map_index(BuddyAllocator<Config>::block_index(
+  while (level > 0 && !BuddyAllocator<Config>::block_is_allocated(
+                          region, map_index(BuddyAllocator<Config>::block_index(
                                       buddy, region, level)))) {
 
     BUDDY_DBG("merging blocks: " << reinterpret_cast<void *>(block) << " and "
@@ -201,9 +177,9 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
     if (level < BuddyAllocator<Config>::_numLevels - 1 &&
         BuddyAllocator<Config>::_sizeMapIsBitmap &&
         BuddyAllocator<Config>::_sizeMapEnabled) {
-      BuddyHelper::clear_bit(
-          BuddyAllocator<Config>::_sizeMap[region],
-          BuddyAllocator<Config>::block_index(block, region, level));
+      BuddyAllocator<Config>::set_split_block(
+          region, BuddyAllocator<Config>::block_index(block, region, level),
+          false);
       BUDDY_DBG("clearing split_idx "
                 << BuddyAllocator<Config>::block_index(block, region, level));
     }
@@ -221,8 +197,8 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
     // Get and mark the next buddy
     if (level > 0) {
       buddy = BuddyAllocator<Config>::get_buddy(block, level);
-      BuddyHelper::flip_bit(
-          BuddyAllocator<Config>::_freeBlocks[region],
+      BuddyAllocator<Config>::flip_allocated_block(
+          region,
           map_index(BuddyAllocator<Config>::block_index(block, region, level)));
       BUDDY_DBG("flipping bit: " << map_index(
                     BuddyAllocator<Config>::block_index(block, region, level)));
@@ -233,9 +209,9 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
   if (level < BuddyAllocator<Config>::_numLevels - 1 &&
       BuddyAllocator<Config>::_sizeMapIsBitmap &&
       BuddyAllocator<Config>::_sizeMapEnabled) {
-    BuddyHelper::clear_bit(
-        BuddyAllocator<Config>::_sizeMap[region],
-        BuddyAllocator<Config>::block_index(block, region, level));
+    BuddyAllocator<Config>::set_split_block(
+        region, BuddyAllocator<Config>::block_index(block, region, level),
+        false);
     BUDDY_DBG("clearing split_idx "
               << BuddyAllocator<Config>::block_index(block, region, level));
   }
@@ -247,18 +223,71 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
 template <typename Config>
 void BinaryBuddyAllocator<Config>::deallocate_range(void *ptr, size_t size) {
   const auto start = reinterpret_cast<uintptr_t>(ptr);
-  const uintptr_t aligned_start = BuddyAllocator<Config>::align_left(
+  uintptr_t aligned_start = BuddyAllocator<Config>::align_left(
       start + BuddyAllocator<Config>::_minSize - 1,
       BuddyAllocator<Config>::_numLevels - 1);
   const uintptr_t end = BuddyAllocator<Config>::align_left(
       start + size, BuddyAllocator<Config>::_numLevels - 1);
-  for (uintptr_t i = aligned_start; i < end;
-       i += BuddyAllocator<Config>::size_of_level(
-           BuddyAllocator<Config>::_numLevels - 1)) {
+  size = end - aligned_start;
 
-    BUDDY_DBG("deallocating block at " << i);
-    deallocate_internal(reinterpret_cast<void *>(i),
-                        BuddyAllocator<Config>::_minSize);
+  const uint8_t region = BuddyAllocator<Config>::get_region(aligned_start);
+  while (aligned_start < end) {
+    BUDDY_DBG("size: " << size);
+    BUDDY_DBG("aligned_start: " << reinterpret_cast<void *>(aligned_start)
+                                << " end: " << reinterpret_cast<void *>(end));
+
+    const uint8_t max_level =
+        BuddyAllocator<Config>::find_smallest_block_level(size);
+
+    uint8_t level;
+    size_t block_size;
+    if (BuddyAllocator<Config>::size_of_level(max_level) == size &&
+        max_level == level_alignment(aligned_start, region, max_level)) {
+      level = max_level;
+      block_size = size;
+    } else {
+      level = level_alignment(aligned_start, region, max_level + 1);
+      block_size = BuddyAllocator<Config>::size_of_level(level);
+    }
+
+    BUDDY_DBG(
+        "deallocating block "
+        << BuddyAllocator<Config>::block_index(aligned_start, region, level)
+        << " level: " << static_cast<int>(level) << " size: " << block_size);
+
+    // Clear all smaller levels
+    for (int i = level + 1; i < BuddyAllocator<Config>::_numLevels; i++) {
+      const unsigned int start_block_idx =
+          BuddyAllocator<Config>::block_index(aligned_start, region, i);
+      for (unsigned int j = start_block_idx;
+           j <
+           start_block_idx + BuddyAllocator<Config>::num_blocks(block_size, i);
+           j++) {
+        BuddyAllocator<Config>::set_allocated_block(region, map_index(j),
+                                                    false);
+        if (BuddyAllocator<Config>::_sizeMapIsBitmap &&
+            BuddyAllocator<Config>::_sizeMapEnabled &&
+            i < BuddyAllocator<Config>::_numLevels - 1) {
+          BuddyAllocator<Config>::set_split_block(region, j, false);
+        }
+      }
+    }
+
+    // Clear final split bit
+    if (BuddyAllocator<Config>::_sizeMapIsBitmap &&
+        BuddyAllocator<Config>::_sizeMapEnabled &&
+        level < BuddyAllocator<Config>::_numLevels - 1) {
+      BUDDY_DBG("clearing split_idx " << BuddyAllocator<Config>::block_index(
+                    aligned_start, region, level));
+      BuddyAllocator<Config>::set_split_block(
+          region,
+          BuddyAllocator<Config>::block_index(aligned_start, region, level),
+          false);
+    }
+
+    deallocate_internal(reinterpret_cast<void *>(aligned_start), block_size);
+    aligned_start += block_size;
+    size -= block_size;
   }
 }
 
@@ -279,4 +308,25 @@ unsigned int BinaryBuddyAllocator<Config>::map_index(unsigned int index) {
   return (index - 1) / 2 + 1;
 
   // return (index - 1) / 2;
+}
+
+// Gets the highest level that the pointer is aligned to
+template <typename Config>
+uint8_t BinaryBuddyAllocator<Config>::level_alignment(uintptr_t ptr,
+                                                      uint8_t region,
+                                                      uint8_t start_level) {
+  if (start_level >= BuddyAllocator<Config>::_numLevels) {
+    return BuddyAllocator<Config>::_numLevels - 1;
+  }
+
+  const uintptr_t offset = ptr - BuddyAllocator<Config>::region_start(region);
+  uint8_t level = start_level;
+  uintptr_t mask =
+      (0x1UL << (BuddyAllocator<Config>::_maxBlockSizeLog2 - start_level)) - 1;
+  while ((offset & mask) != 0) {
+    level++;
+    mask >>= 1U;
+  }
+
+  return level;
 }

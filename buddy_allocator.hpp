@@ -6,6 +6,7 @@
 #include "buddy_helper.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 
 // Define the BuddyAllocator class
 
@@ -33,6 +34,8 @@ public:
 
 protected:
   void init_free_lists();
+  void set_bitmaps(unsigned char freeBlocksPattern,
+                   unsigned char sizeMapPattern);
   uintptr_t region_start(uint8_t region);
   unsigned int size_of_level(uint8_t level);
   unsigned int index_in_level(uintptr_t ptr, uint8_t region, uint8_t level);
@@ -47,10 +50,17 @@ protected:
   void split_bits(uintptr_t ptr, uint8_t region, uint8_t level_start,
                   uint8_t level_end);
   void set_level(uintptr_t ptr, uint8_t region, uint8_t level);
-  int find_smallest_block_level(size_t size);
+  uint8_t find_smallest_block_level(size_t size);
   void push_free_list(uintptr_t ptr, uint8_t region, uint8_t level);
   bool free_list_empty(uint8_t region, uint8_t level);
   uintptr_t pop_free_list(uint8_t region, uint8_t level);
+
+  void set_split_block(uint8_t region, unsigned int blockIndex, bool split);
+  void set_allocated_block(uint8_t region, unsigned int blockIndex,
+                           bool allocated);
+  void flip_allocated_block(uint8_t region, unsigned int blockIndex);
+  bool block_is_split(uint8_t region, unsigned int blockIndex);
+  bool block_is_allocated(uint8_t region, unsigned int blockIndex);
 
   virtual void *allocate_internal(size_t size) = 0;
   virtual void deallocate_internal(void *ptr, size_t size) = 0;
@@ -69,25 +79,28 @@ protected:
 
   int _topLevel[Config::numRegions] = {0};
 
+private:
   // Bitmap of either split blocks or allocated block sizes
   unsigned char _sizeMap[Config::numRegions][Config::sizeBitmapSize];
 
   // Bitmap of allocated blocks
   unsigned char _freeBlocks[Config::numRegions][Config::allocedBitmapSize];
 
-// private:
   uintptr_t _start;
   size_t _totalSize;
 
   // Array of free lists for each block size
   double_link _freeList[Config::numRegions][Config::numLevels];
   // Private member variables
-  int _lazyThreshold = 0;
 
-  double_link _lazyList = {&_lazyList, &_lazyList};
-  int _lazyListSize = 0;
+  int _lazyThresholds[Config::numLevels] = {0};
+  double_link _lazyList[Config::numLevels];
+  int _lazyListSize[Config::numLevels] = {0};
+
+  std::mutex _mutex;
 
   // Private member functions
+  void init_lazy_lists(int lazyThreshold);
 };
 
 #endif // BUDDY_ALLOCATOR_HPP

@@ -29,6 +29,7 @@ private:
   void init_bitmaps(bool startFull);
   void init_free_lists();
   unsigned int map_index(unsigned int index);
+  uint8_t level_alignment(uintptr_t ptr, uint8_t region, uint8_t start_level);
 };
 
 #endif // IBUDDY_HPP

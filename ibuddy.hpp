@@ -7,8 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 
-
-
 template <typename Config>
 class IBuddyAllocator : public BuddyAllocator<Config> {
 public:

@@ -137,7 +137,7 @@ size_t BuddyAllocator<Config>::get_alloc_size(uintptr_t ptr) {
 
 // Returns the level of the smallest block that can fit the given size
 template <typename Config>
-int BuddyAllocator<Config>::find_smallest_block_level(size_t size) {
+uint8_t BuddyAllocator<Config>::find_smallest_block_level(size_t size) {
   for (size_t i = _minBlockSizeLog2; i <= _maxBlockSizeLog2; i++) {
     if (size <= 1U << i) {
       BUDDY_DBG("level: " << _maxBlockSizeLog2 - i << " size: " << (1 << i));
@@ -191,6 +191,42 @@ template <typename Config> void BuddyAllocator<Config>::init_free_lists() {
 }
 
 template <typename Config>
+void BuddyAllocator<Config>::set_bitmaps(unsigned char freeBlocksPattern,
+                                         unsigned char sizeMapPattern) {
+  for (int i = 0; i < Config::numRegions; i++) {
+    for (int j = 0; j < Config::allocedBitmapSize; j++) {
+      _freeBlocks[i][j] = freeBlocksPattern;
+    }
+  }
+
+  if (!_sizeMapEnabled) {
+    return;
+  }
+
+  if (Config::sizeBits == 0) { // Bitmap indicates split blocks
+    for (int i = 0; i < Config::numRegions; i++) {
+      for (int j = 0; j < Config::sizeBitmapSize; j++) {
+        _sizeMap[i][j] = sizeMapPattern;
+      }
+    }
+  }
+}
+
+template <typename Config>
+void BuddyAllocator<Config>::init_lazy_lists(int lazyThreshold) {
+  for (int l = 0; l < Config::numLevels; l++) {
+    _lazyList[l] = {&_lazyList[l], &_lazyList[l]};
+  }
+
+  uint8_t level = _numLevels - 1;
+  while (lazyThreshold > 0 && level > 0) {
+    _lazyThresholds[level] = lazyThreshold;
+    lazyThreshold /= 2;
+    level--;
+  }
+}
+
+template <typename Config>
 BuddyAllocator<Config>::BuddyAllocator(void *start, int lazyThreshold,
                                        bool startFull) {
 
@@ -224,9 +260,8 @@ BuddyAllocator<Config>::BuddyAllocator(void *start, int lazyThreshold,
   _start = reinterpret_cast<uintptr_t>(start);
   _totalSize = Config::numRegions * Config::maxBlockSize;
   _freeSize = startFull ? 0 : _totalSize;
-  _lazyThreshold = lazyThreshold;
 
-  _lazyList = {&_lazyList, &_lazyList};
+  init_lazy_lists(lazyThreshold);
 }
 
 // Returns the free size
@@ -243,30 +278,52 @@ void *BuddyAllocator<Config>::allocate(size_t totalSize) {
     return nullptr;
   }
 
-  // Allocate from lazy list if possible
-  if (_lazyListSize > 0 &&
-      totalSize <= static_cast<size_t>(_minSize)) {
-    BUDDY_DBG("Allocating from lazy list");
-    void *block = BuddyHelper::pop_first(&_lazyList);
-    BUDDY_DBG("allocated block "
+  _mutex.lock();
+
+  uint8_t level = find_smallest_block_level(totalSize);
+  if (_lazyListSize[level] > 0) {
+    void *block = BuddyHelper::pop_first(&_lazyList[level]);
+    _lazyListSize[level]--;
+    _freeSize -= BuddyHelper::round_up_pow2(totalSize);
+    BUDDY_DBG("Allocated block "
               << block_index(reinterpret_cast<uintptr_t>(block),
                              get_region(reinterpret_cast<uintptr_t>(block)),
                              _numLevels - 1)
               << " at " << reinterpret_cast<uintptr_t>(block) - _start
               << " level: " << _numLevels - 1);
-    _lazyListSize--;
-    _freeSize -= _minSize;
-
+    _mutex.unlock();
     return block;
   }
 
-  return allocate_internal(totalSize);
+  // Allocate from lazy list if possible
+  // if (_lazyListSize > 0 && totalSize <= static_cast<size_t>(_minSize)) {
+  //   BUDDY_DBG("Allocating from lazy list");
+  //   void *block = BuddyHelper::pop_first(&_lazyList);
+  //   BUDDY_DBG("allocated block "
+  //             << block_index(reinterpret_cast<uintptr_t>(block),
+  //                            get_region(reinterpret_cast<uintptr_t>(block)),
+  //                            _numLevels - 1)
+  //             << " at " << reinterpret_cast<uintptr_t>(block) - _start
+  //             << " level: " << _numLevels - 1);
+  //   _lazyListSize--;
+  //   _freeSize -= _minSize;
+
+  //   _mutex.unlock();
+  //   return block;
+  // }
+
+  void *p = allocate_internal(totalSize);
+  _mutex.unlock();
+  return p;
 }
 
 // Deallocates a block of memory of the given size
 template <typename Config>
 void BuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
-  if (size <= static_cast<size_t>(_minSize) && _lazyListSize < _lazyThreshold) {
+
+  uint8_t level = find_smallest_block_level(size);
+
+  if (_lazyListSize[level] < _lazyThresholds[level]) {
     BUDDY_DBG("inserting " << reinterpret_cast<uintptr_t>(ptr) - _start
                            << " with index "
                            << block_index(
@@ -274,12 +331,28 @@ void BuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
                                   get_region(reinterpret_cast<uintptr_t>(ptr)),
                                   _numLevels - 1)
                            << " into lazy list");
-    BuddyHelper::push_back(&_lazyList, static_cast<double_link *>(ptr));
-    _lazyListSize++;
-    _freeSize += _minSize;
-    BUDDY_DBG("lazy list size: " << _lazyListSize);
+    BuddyHelper::push_back(&_lazyList[level], static_cast<double_link *>(ptr));
+    _lazyListSize[level]++;
+    _freeSize += BuddyHelper::round_up_pow2(size);
+    BUDDY_DBG("lazy list size: " << _lazyListSize[level]);
     return;
   }
+
+  // if (size <= static_cast<size_t>(_minSize) && _lazyListSize <
+  // _lazyThreshold) {
+  //   BUDDY_DBG("inserting " << reinterpret_cast<uintptr_t>(ptr) - _start
+  //                          << " with index "
+  //                          << block_index(
+  //                                 reinterpret_cast<uintptr_t>(ptr),
+  //                                 get_region(reinterpret_cast<uintptr_t>(ptr)),
+  //                                 _numLevels - 1)
+  //                          << " into lazy list");
+  //   BuddyHelper::push_back(&_lazyList, static_cast<double_link *>(ptr));
+  //   _lazyListSize++;
+  //   _freeSize += _minSize;
+  //   BUDDY_DBG("lazy list size: " << _lazyListSize);
+  //   return;
+  // }
 
   deallocate_internal(ptr, BuddyHelper::round_up_pow2(size));
 }
@@ -298,13 +371,20 @@ template <typename Config> void BuddyAllocator<Config>::deallocate(void *ptr) {
 
 // Empties the lazy list, inserting blocks back into the free list
 template <typename Config> void BuddyAllocator<Config>::empty_lazy_list() {
-  while (_lazyListSize > 0) {
-    void *block = BuddyHelper::pop_first(&_lazyList);
-    _lazyListSize--;
-    deallocate_range(block, _minSize);
-    // deallocate_single(block);
-    // Compensate for the increase size, as the block is just moved, not freed
-    _freeSize -= _minSize;
+  for (uint8_t l = 0; l < _numLevels; l++) {
+    while (_lazyListSize[l] > 0) {
+      void *block = BuddyHelper::pop_first(&_lazyList[l]);
+      _lazyListSize[l]--;
+
+      unsigned int level_size = size_of_level(l);
+      deallocate_internal(block, level_size);
+
+      // deallocate(block);
+      // deallocate_single(block);
+      // Compensate for the increase size, as the block is just moved, not freed
+      // _freeSize -= BuddyHelper::round_up_pow2(size_of_level(l));
+      _freeSize -= level_size;
+    }
   }
 }
 
@@ -325,6 +405,46 @@ template <typename Config>
 uintptr_t BuddyAllocator<Config>::pop_free_list(uint8_t region, uint8_t level) {
   double_link *block = BuddyHelper::pop_first(&_freeList[region][level]);
   return reinterpret_cast<uintptr_t>(block);
+}
+
+template <typename Config>
+void BuddyAllocator<Config>::set_split_block(uint8_t region,
+                                             unsigned int blockIndex,
+                                             bool split) {
+  if (split) {
+    BuddyHelper::set_bit(_sizeMap[region], blockIndex);
+  } else {
+    BuddyHelper::clear_bit(_sizeMap[region], blockIndex);
+  }
+}
+
+template <typename Config>
+void BuddyAllocator<Config>::set_allocated_block(uint8_t region,
+                                                 unsigned int blockIndex,
+                                                 bool allocated) {
+  if (allocated) {
+    BuddyHelper::set_bit(_freeBlocks[region], blockIndex);
+  } else {
+    BuddyHelper::clear_bit(_freeBlocks[region], blockIndex);
+  }
+}
+
+template <typename Config>
+void BuddyAllocator<Config>::flip_allocated_block(uint8_t region,
+                                                  unsigned int blockIndex) {
+  BuddyHelper::flip_bit(_freeBlocks[region], blockIndex);
+}
+
+template <typename Config>
+bool BuddyAllocator<Config>::block_is_split(uint8_t region,
+                                            unsigned int blockIndex) {
+  return BuddyHelper::bit_is_set(_sizeMap[region], blockIndex);
+}
+
+template <typename Config>
+bool BuddyAllocator<Config>::block_is_allocated(uint8_t region,
+                                                unsigned int blockIndex) {
+  return BuddyHelper::bit_is_set(_freeBlocks[region], blockIndex);
 }
 
 // Prints the free list
