@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <sys/mman.h>
+#include <thread>
 
 #ifdef DEBUG
 #define BUDDY_DBG(x) std::cout << x << std::endl;
@@ -18,8 +19,9 @@
 
 template <typename Config>
 void BinaryBuddyAllocator<Config>::init_bitmaps(bool startFull) {
-  unsigned char freeBlocksPattern = 0x0;                 // 0x55 = 01010101
-  unsigned char sizeMapPattern = startFull ? 0xFF : 0x0; // 0xFF = 11111111
+  const unsigned char freeBlocksPattern = 0x0; // 0x55 = 01010101
+  const unsigned char sizeMapPattern =
+      startFull ? 0xFF : 0x0; // 0xFF = 11111111
 
   BuddyAllocator<Config>::set_bitmaps(freeBlocksPattern, sizeMapPattern);
 }
@@ -36,13 +38,8 @@ BinaryBuddyAllocator<Config>::BinaryBuddyAllocator(void *start,
   if (!startFull) {
     for (int r = 0; r < Config::numRegions; r++) {
       uintptr_t curr_start = BuddyAllocator<Config>::region_start(r);
-      // BUDDY_DBG("start: " << reinterpret_cast<void *>(_start));
       BUDDY_DBG("curr_start: " << reinterpret_cast<void *>(curr_start));
       BuddyAllocator<Config>::push_free_list(curr_start, r, 0);
-
-      // Initialize
-      // start_link->prev = &BuddyAllocator<Config>::_freeList[r][0];
-      // start_link->next = &BuddyAllocator<Config>::_freeList[r][0];
     }
   }
 }
@@ -76,60 +73,85 @@ void *BinaryBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
       BuddyAllocator<Config>::find_smallest_block_level(totalSize);
   uint8_t block_level = start_block_level;
 
-  for (r = 0; r < BuddyAllocator<Config>::_numRegions; r++) {
-    block_level = start_block_level;
+  const std::thread::id this_id = std::this_thread::get_id();
+  const std::hash<std::thread::id> hasher;
+  const size_t threadOffset =
+      hasher(this_id) % BuddyAllocator<Config>::_numRegions;
+  bool all_checked = true;
 
-    while (!found) {
-      if (!BuddyAllocator<Config>::free_list_empty(r, block_level)) {
-        found = true;
-      } else if (block_level > 0) {
-        block_level--;
-
-        if (!BuddyAllocator<Config>::free_list_empty(r, block_level)) {
-          // Larger block found, split it
-          const uintptr_t block =
-              BuddyAllocator<Config>::pop_free_list(r, block_level);
-
-          // Mark block as split
-          const unsigned int block_idx =
-              BuddyAllocator<Config>::block_index(block, r, block_level);
-          if (BuddyAllocator<Config>::_sizeMapIsBitmap &&
-              BuddyAllocator<Config>::_sizeMapEnabled) {
-            BuddyAllocator<Config>::set_split_block(r, block_idx, true);
-            BUDDY_DBG("setting split_idx " << block_idx);
-          }
-
-          // Mark block as allocated
-          if (block_level > 0) {
-            BuddyAllocator<Config>::flip_allocated_block(r,
-                                                         map_index(block_idx));
-            BUDDY_DBG("flipping bit: " << map_index(block_idx));
-          }
-
-          // Split the block into two
-          const uintptr_t buddy =
-              block + BuddyAllocator<Config>::size_of_level(block_level + 1);
-
-          // Insert the two blocks into the free list
-          BuddyAllocator<Config>::push_free_list(block, r, block_level + 1);
-          BuddyAllocator<Config>::push_free_list(buddy, r, block_level + 1);
-
-          block_level = start_block_level;
-        }
-      } else {
-        break;
-      }
-    }
-
-    if (found) {
+  for (int attempt = 0; attempt < 2; attempt++) {
+    if (attempt == 1 && all_checked) {
       break;
     }
+
+    for (size_t r_offset = threadOffset;
+         r_offset < BuddyAllocator<Config>::_numRegions + threadOffset;
+         r_offset++) {
+
+      r = r_offset % BuddyAllocator<Config>::_numRegions;
+      if (attempt == 0 &&
+          !BuddyAllocator<Config>::_regionMutexes[r].try_lock()) {
+        all_checked = false;
+        continue;
+      }
+      if (attempt == 1) {
+        BuddyAllocator<Config>::_regionMutexes[r].lock();
+      }
+
+      block_level = start_block_level;
+
+      while (!found) {
+        if (!BuddyAllocator<Config>::free_list_empty(r, block_level)) {
+          found = true;
+        } else if (block_level > 0) {
+          block_level--;
+
+          if (!BuddyAllocator<Config>::free_list_empty(r, block_level)) {
+            // Larger block found, split it
+            const uintptr_t block =
+                BuddyAllocator<Config>::pop_free_list(r, block_level);
+
+            // Mark block as split
+            const unsigned int block_idx =
+                BuddyAllocator<Config>::block_index(block, r, block_level);
+            if (BuddyAllocator<Config>::_sizeMapIsBitmap &&
+                BuddyAllocator<Config>::_sizeMapEnabled) {
+              BuddyAllocator<Config>::set_split_block(r, block_idx, true);
+              BUDDY_DBG("setting split_idx " << block_idx);
+            }
+
+            // Mark block as allocated
+            if (block_level > 0) {
+              BuddyAllocator<Config>::flip_allocated_block(
+                  r, map_index(block_idx));
+              BUDDY_DBG("flipping bit: " << map_index(block_idx));
+            }
+
+            // Split the block into two
+            const uintptr_t buddy =
+                block + BuddyAllocator<Config>::size_of_level(block_level + 1);
+
+            // Insert the two blocks into the free list
+            BuddyAllocator<Config>::push_free_list(block, r, block_level + 1);
+            BuddyAllocator<Config>::push_free_list(buddy, r, block_level + 1);
+
+            block_level = start_block_level;
+          }
+        } else {
+          break;
+        }
+      }
+
+      if (found) {
+        goto block_found;
+      }
+      BuddyAllocator<Config>::_regionMutexes[r].unlock();
+    }
   }
 
-  if (!found) {
-    return nullptr;
-  }
+  return nullptr;
 
+block_found:
   const uintptr_t block = BuddyAllocator<Config>::pop_free_list(r, block_level);
 
   // Mark block as allocated
@@ -145,6 +167,7 @@ void *BinaryBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
   }
 
   BuddyAllocator<Config>::_freeSize -= BuddyHelper::round_up_pow2(totalSize);
+  BuddyAllocator<Config>::_regionMutexes[r].unlock();
   return reinterpret_cast<void *>(block);
 }
 

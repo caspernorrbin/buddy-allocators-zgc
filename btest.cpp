@@ -5,48 +5,48 @@
 int main() {
   const unsigned int minSizeLog2 = 4;
   const unsigned int maxSizeLog2 = 8;
-  const int numRegions = 2;
+  const int numRegions = 1;
   const int sizeBits = 0;
   const int lazyThreshold = 0;
-  const bool startFull = false;
+  const bool startFull = true;
   const bool useSizeMap = true;
 
   using Config =
       BuddyConfig<minSizeLog2, maxSizeLog2, numRegions, useSizeMap, sizeBits>;
 
   unsigned char mempool[(1U << maxSizeLog2) * numRegions];
-  BinaryBuddyAllocator<SmallDoubleConfig> *allocator =
-      BinaryBuddyAllocator<SmallDoubleConfig>::create(nullptr, &mempool, lazyThreshold,
+  BinaryBuddyAllocator<SmallSingleConfig> *allocator =
+      BinaryBuddyAllocator<SmallSingleConfig>::create(nullptr, &mempool, lazyThreshold,
                                            startFull);
 
   allocator->print_free_list();
   allocator->print_bitmaps();
 
-  // allocator->deallocate_range(&mempool[32], (1U << maxSizeLog2) * numRegions
-  // * 2 / 3 + 1);
+  // allocator->deallocate_range(&mempool[16], (1UL << maxSizeLog2) * numRegions - 16);
+  allocator->deallocate_range(&mempool[0], 256);
 
-  // allocator->print_free_list();
-  // allocator->print_bitmaps();
-
-  void *block1 = allocator->allocate(256);
-  // allocator->print_free_list();
   allocator->print_free_list();
   allocator->print_bitmaps();
-  void *block2 = allocator->allocate(17);
+
+  // void *block1 = allocator->allocate(256);
   // allocator->print_free_list();
   // allocator->print_free_list();
   // allocator->print_bitmaps();
-  void *block3 = allocator->allocate(16);
-  std::cout << "Block 1: " << block1 << std::endl;
-  std::cout << "Block 2: " << block2 << std::endl;
-  std::cout << "Block 3: " << block3 << std::endl;
-  allocator->print_free_list();
-  allocator->print_bitmaps();
-  allocator->deallocate(block3);
-  allocator->deallocate(block2);
-  allocator->deallocate(block1);
-  allocator->print_free_list();
-  allocator->print_bitmaps();
+  // void *block2 = allocator->allocate(17);
+  // allocator->print_free_list();
+  // allocator->print_free_list();
+  // allocator->print_bitmaps();
+  // void *block3 = allocator->allocate(16);
+  // std::cout << "Block 1: " << block1 << std::endl;
+  // std::cout << "Block 2: " << block2 << std::endl;
+  // std::cout << "Block 3: " << block3 << std::endl;
+  // allocator->print_free_list();
+  // allocator->print_bitmaps();
+  // allocator->deallocate(block3);
+  // allocator->deallocate(block2);
+  // allocator->deallocate(block1);
+  // allocator->print_free_list();
+  // allocator->print_bitmaps();
 
   // Print the addresses of the allocated blocks
 

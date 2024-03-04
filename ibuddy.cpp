@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <sys/mman.h>
+#include <thread>
 
 #ifdef DEBUG
 #define BUDDY_DBG(x) std::cout << x << std::endl;
@@ -85,37 +86,54 @@ IBuddyAllocator<Config>::create(void *addr, void *start, int lazyThreshold,
 template <typename Config>
 void *IBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
 
+  std::thread::id this_id = std::this_thread::get_id();
+  std::hash<std::thread::id> hasher;
+  size_t threadOffset = hasher(this_id) % BuddyAllocator<Config>::_numRegions;
+  bool all_checked = true;
+
   uint8_t region = 0;
-
-  while (region < BuddyAllocator<Config>::_numRegions) {
-    // Move down if the current level inside the region has been exhausted
-
-    while (BuddyAllocator<Config>::free_list_empty(
-               region, BuddyAllocator<Config>::_topLevel[region]) &&
-           BuddyAllocator<Config>::_topLevel[region] <
-               BuddyAllocator<Config>::_numLevels) {
-      BuddyAllocator<Config>::_topLevel[region]++;
-    }
-    if (BuddyAllocator<Config>::size_of_level(
-            BuddyAllocator<Config>::_topLevel[region]) >= totalSize) {
+  for (int attempt = 0; attempt < 2; attempt++) {
+    if (attempt == 1 && all_checked) {
       break;
     }
-    region++;
+
+    for (size_t r_offset = threadOffset;
+         r_offset < BuddyAllocator<Config>::_numRegions + threadOffset;
+         r_offset++) {
+      region = r_offset % BuddyAllocator<Config>::_numRegions;
+      if (attempt == 0 &&
+          !BuddyAllocator<Config>::_regionMutexes[region].try_lock()) {
+        all_checked = false;
+        continue;
+      }
+      if (attempt == 1) {
+        BuddyAllocator<Config>::_regionMutexes[region].lock();
+      }
+
+      // Move down if the current level inside the region has been exhausted
+      while (BuddyAllocator<Config>::free_list_empty(
+                 region, BuddyAllocator<Config>::_topLevel[region]) &&
+             BuddyAllocator<Config>::_topLevel[region] <
+                 BuddyAllocator<Config>::_numLevels) {
+        BuddyAllocator<Config>::_topLevel[region]++;
+      }
+
+      if (BuddyAllocator<Config>::size_of_level(
+              BuddyAllocator<Config>::_topLevel[region]) >= totalSize) {
+        goto block_found;
+      }
+
+      BuddyAllocator<Config>::_regionMutexes[region].unlock();
+    }
   }
+
+  return nullptr;
+
+block_found:
 
   uint8_t level = BuddyAllocator<Config>::_topLevel[region];
   BUDDY_DBG("at region: " << (int)region << ", level: " << (int)level
                           << " with block size: " << size_of_level(level));
-
-  // No free block large enough available
-  if (region == BuddyAllocator<Config>::_numRegions ||
-      level == BuddyAllocator<Config>::_numLevels ||
-      BuddyAllocator<Config>::free_list_empty(region, level) ||
-      static_cast<size_t>(BuddyAllocator<Config>::size_of_level(level)) <
-          totalSize) {
-    BUDDY_DBG("No free blocks available");
-    return nullptr;
-  }
 
   // Get the first free block
   uintptr_t block = BuddyAllocator<Config>::pop_free_list(region, level);
@@ -123,7 +141,6 @@ void *IBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
   const uint8_t block_level =
       BuddyAllocator<Config>::find_smallest_block_level(totalSize);
 
-  // Multiple blocks needed, align the block for its level
   const uintptr_t block_left =
       BuddyAllocator<Config>::align_left(block, block_level);
   BUDDY_DBG("aligned block " << block_index(block_left, region, level) << " at "
@@ -148,6 +165,7 @@ void *IBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
   // Can fit in one block
   if (totalSize <= static_cast<size_t>(BuddyAllocator<Config>::_minSize)) {
     BuddyAllocator<Config>::_freeSize -= BuddyAllocator<Config>::_minSize;
+    BuddyAllocator<Config>::_regionMutexes[region].unlock();
     return reinterpret_cast<void *>(block);
   }
 
@@ -184,6 +202,7 @@ void *IBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
 
   BuddyAllocator<Config>::_freeSize -= new_size;
 
+  BuddyAllocator<Config>::_regionMutexes[region].unlock();
   return reinterpret_cast<void *>(block_left);
 }
 

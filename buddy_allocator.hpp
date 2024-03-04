@@ -65,8 +65,6 @@ protected:
   virtual void *allocate_internal(size_t size) = 0;
   virtual void deallocate_internal(void *ptr, size_t size) = 0;
 
-  size_t _freeSize;
-
   const uint8_t _numRegions = Config::numRegions;
   const uint8_t _numLevels = Config::numLevels;
   const size_t _minBlockSizeLog2 = Config::minBlockSizeLog2;
@@ -77,7 +75,11 @@ protected:
   const bool _sizeMapEnabled = Config::useSizeMap;
   const bool _sizeMapIsBitmap = Config::sizeBits == 0;
 
-  int _topLevel[Config::numRegions] = {0};
+  size_t _freeSize;
+
+  int64_t _topLevel[Config::numRegions] = {0};
+
+  std::mutex _regionMutexes[Config::numRegions];
 
 private:
   // Bitmap of either split blocks or allocated block sizes
@@ -96,8 +98,7 @@ private:
   int _lazyThresholds[Config::numLevels] = {0};
   double_link _lazyList[Config::numLevels];
   int _lazyListSize[Config::numLevels] = {0};
-
-  std::mutex _mutex;
+  std::mutex _lazyMutex;
 
   // Private member functions
   void init_lazy_lists(int lazyThreshold);

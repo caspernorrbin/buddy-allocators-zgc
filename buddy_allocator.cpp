@@ -278,42 +278,26 @@ void *BuddyAllocator<Config>::allocate(size_t totalSize) {
     return nullptr;
   }
 
-  _mutex.lock();
-
   uint8_t level = find_smallest_block_level(totalSize);
   if (_lazyListSize[level] > 0) {
-    void *block = BuddyHelper::pop_first(&_lazyList[level]);
-    _lazyListSize[level]--;
-    _freeSize -= BuddyHelper::round_up_pow2(totalSize);
-    BUDDY_DBG("Allocated block "
-              << block_index(reinterpret_cast<uintptr_t>(block),
-                             get_region(reinterpret_cast<uintptr_t>(block)),
-                             _numLevels - 1)
-              << " at " << reinterpret_cast<uintptr_t>(block) - _start
-              << " level: " << _numLevels - 1);
-    _mutex.unlock();
-    return block;
+    bool locked = _lazyMutex.try_lock();
+    if (locked && _lazyListSize[level] > 0) {
+      void *block = BuddyHelper::pop_first(&_lazyList[level]);
+      _lazyListSize[level]--;
+      _freeSize -= BuddyHelper::round_up_pow2(totalSize);
+      BUDDY_DBG("Allocated block "
+                << block_index(reinterpret_cast<uintptr_t>(block),
+                               get_region(reinterpret_cast<uintptr_t>(block)),
+                               _numLevels - 1)
+                << " at " << reinterpret_cast<uintptr_t>(block) - _start
+                << " level: " << _numLevels - 1);
+      _lazyMutex.unlock();
+      return block;
+    }
+    _lazyMutex.unlock();
   }
 
-  // Allocate from lazy list if possible
-  // if (_lazyListSize > 0 && totalSize <= static_cast<size_t>(_minSize)) {
-  //   BUDDY_DBG("Allocating from lazy list");
-  //   void *block = BuddyHelper::pop_first(&_lazyList);
-  //   BUDDY_DBG("allocated block "
-  //             << block_index(reinterpret_cast<uintptr_t>(block),
-  //                            get_region(reinterpret_cast<uintptr_t>(block)),
-  //                            _numLevels - 1)
-  //             << " at " << reinterpret_cast<uintptr_t>(block) - _start
-  //             << " level: " << _numLevels - 1);
-  //   _lazyListSize--;
-  //   _freeSize -= _minSize;
-
-  //   _mutex.unlock();
-  //   return block;
-  // }
-
   void *p = allocate_internal(totalSize);
-  _mutex.unlock();
   return p;
 }
 
@@ -337,22 +321,6 @@ void BuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
     BUDDY_DBG("lazy list size: " << _lazyListSize[level]);
     return;
   }
-
-  // if (size <= static_cast<size_t>(_minSize) && _lazyListSize <
-  // _lazyThreshold) {
-  //   BUDDY_DBG("inserting " << reinterpret_cast<uintptr_t>(ptr) - _start
-  //                          << " with index "
-  //                          << block_index(
-  //                                 reinterpret_cast<uintptr_t>(ptr),
-  //                                 get_region(reinterpret_cast<uintptr_t>(ptr)),
-  //                                 _numLevels - 1)
-  //                          << " into lazy list");
-  //   BuddyHelper::push_back(&_lazyList, static_cast<double_link *>(ptr));
-  //   _lazyListSize++;
-  //   _freeSize += _minSize;
-  //   BUDDY_DBG("lazy list size: " << _lazyListSize);
-  //   return;
-  // }
 
   deallocate_internal(ptr, BuddyHelper::round_up_pow2(size));
 }
@@ -379,10 +347,6 @@ template <typename Config> void BuddyAllocator<Config>::empty_lazy_list() {
       unsigned int level_size = size_of_level(l);
       deallocate_internal(block, level_size);
 
-      // deallocate(block);
-      // deallocate_single(block);
-      // Compensate for the increase size, as the block is just moved, not freed
-      // _freeSize -= BuddyHelper::round_up_pow2(size_of_level(l));
       _freeSize -= level_size;
     }
   }
