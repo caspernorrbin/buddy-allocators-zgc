@@ -19,14 +19,13 @@ public:
                                  bool startFull);
 
   void deallocate_range(void *ptr, size_t size) override;
-  void fill() override;
 
 protected:
   void *allocate_internal(size_t size) override;
   void deallocate_internal(void *ptr, size_t size) override;
+  void init_bitmaps(bool startFull) override;
 
 private:
-  void init_bitmaps(bool startFull);
   void init_free_lists();
   void deallocate_single(uintptr_t ptr);
 };

@@ -1,6 +1,7 @@
 #include "buddy_allocator.hpp"
 #include "buddy_helper.hpp"
 #include "buddy_instantiations.hpp"
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -259,14 +260,20 @@ BuddyAllocator<Config>::BuddyAllocator(void *start, int lazyThreshold,
 
   _start = reinterpret_cast<uintptr_t>(start);
   _totalSize = Config::numRegions * Config::maxBlockSize;
-  _freeSize = startFull ? 0 : _totalSize;
+  for (int i = 0; i < Config::numRegions; i ++) {
+    _freeSizes[i] = startFull ? 0 : Config::maxBlockSize;
+  }
 
   init_lazy_lists(lazyThreshold);
 }
 
 // Returns the free size
 template <typename Config> size_t BuddyAllocator<Config>::free_size() {
-  return _freeSize;
+  size_t total = 0;
+  for (int i = 0; i <= Config::numRegions; i ++) {
+    total += _freeSizes[i];
+  }
+  return total;
 }
 
 // Allocates a block of memory of the given size
@@ -280,21 +287,21 @@ void *BuddyAllocator<Config>::allocate(size_t totalSize) {
 
   uint8_t level = find_smallest_block_level(totalSize);
   if (_lazyListSize[level] > 0) {
-    bool locked = _lazyMutex.try_lock();
+    bool locked = _lazyMutexes[level].try_lock();
     if (locked && _lazyListSize[level] > 0) {
       void *block = BuddyHelper::pop_first(&_lazyList[level]);
       _lazyListSize[level]--;
-      _freeSize -= BuddyHelper::round_up_pow2(totalSize);
+      _freeSizes[_numRegions] -= BuddyHelper::round_up_pow2(totalSize);
+      _lazyMutexes[level].unlock();
       BUDDY_DBG("Allocated block "
                 << block_index(reinterpret_cast<uintptr_t>(block),
                                get_region(reinterpret_cast<uintptr_t>(block)),
                                _numLevels - 1)
                 << " at " << reinterpret_cast<uintptr_t>(block) - _start
                 << " level: " << _numLevels - 1);
-      _lazyMutex.unlock();
       return block;
     }
-    _lazyMutex.unlock();
+    _lazyMutexes[level].unlock();
   }
 
   void *p = allocate_internal(totalSize);
@@ -308,6 +315,7 @@ void BuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
   uint8_t level = find_smallest_block_level(size);
 
   if (_lazyListSize[level] < _lazyThresholds[level]) {
+    _lazyMutexes[level].lock();
     BUDDY_DBG("inserting " << reinterpret_cast<uintptr_t>(ptr) - _start
                            << " with index "
                            << block_index(
@@ -317,7 +325,8 @@ void BuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
                            << " into lazy list");
     BuddyHelper::push_back(&_lazyList[level], static_cast<double_link *>(ptr));
     _lazyListSize[level]++;
-    _freeSize += BuddyHelper::round_up_pow2(size);
+    _freeSizes[_numRegions] += BuddyHelper::round_up_pow2(size);
+    _lazyMutexes[level].unlock();
     BUDDY_DBG("lazy list size: " << _lazyListSize[level]);
     return;
   }
@@ -347,7 +356,7 @@ template <typename Config> void BuddyAllocator<Config>::empty_lazy_list() {
       unsigned int level_size = size_of_level(l);
       deallocate_internal(block, level_size);
 
-      _freeSize -= level_size;
+      _freeSizes[_numRegions] -= level_size;
     }
   }
 }
@@ -411,6 +420,16 @@ bool BuddyAllocator<Config>::block_is_allocated(uint8_t region,
   return BuddyHelper::bit_is_set(_freeBlocks[region], blockIndex);
 }
 
+// Fills the memory, marking all blocks as allocated
+// This overwrites previous allocations
+template <typename Config> void BuddyAllocator<Config>::fill() {
+  init_bitmaps(true);
+  BuddyAllocator<Config>::init_free_lists();
+  for (auto &size : BuddyAllocator<Config>::_freeSizes) {
+    size = 0;
+  }
+}
+
 // Prints the free list
 template <typename Config> void BuddyAllocator<Config>::print_free_list() {
   for (int r = 0; r < _numRegions; r++) {
@@ -425,7 +444,11 @@ template <typename Config> void BuddyAllocator<Config>::print_free_list() {
       }
       std::cout << std::endl;
     }
-    std::cout << "Lazy list size: " << _lazyListSize << std::endl;
+    std::cout << "Lazy list sizes: ";
+    for (size_t i = 0; i < static_cast<size_t>(_numLevels); i++) {
+      std::cout << _lazyListSize[i] << " ";
+    }
+    std::cout << std::endl;
   }
 }
 

@@ -1,7 +1,7 @@
 main: bbuddy_debug
 
 CPP_COMPILER = g++
-CPP_FLAGS = -Wall -Wextra -std=c++14 -pedantic -g
+CPP_FLAGS = -Wall -Wextra -std=c++14 -pedantic -ggdb
 CPP_FAST_FLAGS = -Wall -Wextra -std=c++14 -pedantic -O2
 SHARED_LIB = libbuddy.so
 CPP_UNIT = -lcppunit
@@ -46,7 +46,7 @@ benchmark_threads: benchmark_threads_f.o ibuddy_f.o bbuddy_f.o buddy_allocator_f
 	$(CPP_COMPILER) $(CPP_FAST_FLAGS) -o benchmark_threads.out benchmark_threads.o ibuddy.o bbuddy.o buddy_allocator.o
 
 benchmark_threads_s: benchmark_threads.o ibuddy.o bbuddy.o buddy_allocator.o
-	$(CPP_COMPILER) $(CPP_FAST_FLAGS) -o benchmark_threads.out benchmark_threads.o ibuddy.o bbuddy.o buddy_allocator.o
+	$(CPP_COMPILER) $(CPP_FLAGS) -o benchmark_threads.out benchmark_threads.o ibuddy.o bbuddy.o buddy_allocator.o
 
 profile:
 	$(CPP_COMPILER) $(CPP_FAST_FLAGS) -pg ibuddy.cpp buddy_test.cpp -c

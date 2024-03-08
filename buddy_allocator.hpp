@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <atomic>
 
 // Define the BuddyAllocator class
 
@@ -27,7 +28,7 @@ public:
   void deallocate(void *ptr, size_t size);
   virtual void deallocate_range(void *ptr, size_t size) = 0;
   void empty_lazy_list();
-  virtual void fill() = 0;
+  void fill();
 
   void print_free_list();
   void print_bitmaps();
@@ -62,6 +63,7 @@ protected:
   bool block_is_split(uint8_t region, unsigned int blockIndex);
   bool block_is_allocated(uint8_t region, unsigned int blockIndex);
 
+  virtual void init_bitmaps(bool startFull) = 0;
   virtual void *allocate_internal(size_t size) = 0;
   virtual void deallocate_internal(void *ptr, size_t size) = 0;
 
@@ -75,7 +77,7 @@ protected:
   const bool _sizeMapEnabled = Config::useSizeMap;
   const bool _sizeMapIsBitmap = Config::sizeBits == 0;
 
-  size_t _freeSize;
+  size_t _freeSizes[Config::numRegions + 1] = {0};
 
   int64_t _topLevel[Config::numRegions] = {0};
 
@@ -98,7 +100,7 @@ private:
   int _lazyThresholds[Config::numLevels] = {0};
   double_link _lazyList[Config::numLevels];
   int _lazyListSize[Config::numLevels] = {0};
-  std::mutex _lazyMutex;
+  std::mutex _lazyMutexes[Config::numLevels];
 
   // Private member functions
   void init_lazy_lists(int lazyThreshold);

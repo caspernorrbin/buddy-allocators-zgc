@@ -2,6 +2,7 @@
 #include "buddy_config.hpp"
 // #include "ibuddy.hpp"
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <fstream>
@@ -13,13 +14,18 @@
 #include <vector>
 
 const int n_cycles = 1;
-const int total_runs = 40;
-const int n_threads = 8;
+const int total_runs = 32;
+const int n_threads = 1;
 const int runs_per_thread = total_runs / n_threads;
 const size_t max_allocs = -1;
-const bool should_free = true;
-// const std::string filename = "runs/dh2.txt";
-const std::string filename = "runs/nano.txt";
+const bool should_free = false;
+
+const bool const_allocs = true;
+const int num_const_allocs = 1000000;
+const size_t const_alloc_size = 16;
+
+const std::string filename = "runs/dh2.txt";
+// const std::string filename = "runs/ls.txt";
 
 std::array<std::vector<void *>, n_threads> allocations;
 
@@ -27,15 +33,28 @@ void allocate_run(BuddyAllocator<MallocConfig> *allocator,
                   std::vector<size_t> &allocation_sizes, int i) {
   size_t num_allocations = 0;
   for (int j = 0; j < runs_per_thread; j++) {
-    for (const auto &size : allocation_sizes) {
-      if (num_allocations++ >= max_allocs) {
-        break;
+    if (const_allocs) {
+      for (int k = 0; k < num_const_allocs; k++) {
+        void *p = allocator->allocate(const_alloc_size);
+        assert(p != nullptr);
+        if (should_free) {
+          allocations[i].push_back(p);
+        }
       }
 
-      void *p = allocator->allocate(size);
 
-      if (should_free) {
-        allocations[i].push_back(p);
+    } else {
+      for (const auto &size : allocation_sizes) {
+        if (num_allocations++ >= max_allocs) {
+          break;
+        }
+
+        void *p = allocator->allocate(size);
+        assert(p != nullptr);
+
+        if (should_free) {
+          allocations[i].push_back(p);
+        }
       }
     }
   }
@@ -72,7 +91,7 @@ int main() {
 
   BuddyAllocator<MallocConfig> *allocator =
       // IBuddyAllocator<MallocConfig>::create(nullptr, nullptr, 0, false);
-      BinaryBuddyAllocator<MallocConfig>::create(nullptr, nullptr, 1024, false);
+  BinaryBuddyAllocator<MallocConfig>::create(nullptr, nullptr, 0, false);
   // allocator->print_free_list();
 
   std::vector<std::thread> threads(n_threads);

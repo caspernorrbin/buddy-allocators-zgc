@@ -164,7 +164,8 @@ block_found:
 
   // Can fit in one block
   if (totalSize <= static_cast<size_t>(BuddyAllocator<Config>::_minSize)) {
-    BuddyAllocator<Config>::_freeSize -= BuddyAllocator<Config>::_minSize;
+    BuddyAllocator<Config>::_freeSizes[region] -=
+        BuddyAllocator<Config>::_minSize;
     BuddyAllocator<Config>::_regionMutexes[region].unlock();
     return reinterpret_cast<void *>(block);
   }
@@ -200,7 +201,7 @@ block_found:
     }
   }
 
-  BuddyAllocator<Config>::_freeSize -= new_size;
+  BuddyAllocator<Config>::_freeSizes[region] -= new_size;
 
   BuddyAllocator<Config>::_regionMutexes[region].unlock();
   return reinterpret_cast<void *>(block_left);
@@ -250,7 +251,8 @@ void IBuddyAllocator<Config>::deallocate_single(uintptr_t ptr) {
     BuddyAllocator<Config>::_topLevel[region] = level;
   }
 
-  BuddyAllocator<Config>::_freeSize += BuddyAllocator<Config>::_minSize;
+  BuddyAllocator<Config>::_freeSizes[region] +=
+      BuddyAllocator<Config>::_minSize;
 }
 
 // Deallocates a range of blocks of memory as if they were the smallest block
@@ -275,12 +277,4 @@ void IBuddyAllocator<Config>::deallocate_range(void *ptr, size_t size) {
 template <typename Config>
 void IBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
   return deallocate_range(ptr, BuddyHelper::round_up_pow2(size));
-}
-
-// Fills the memory, marking all blocks as allocated
-// This overwrites previous allocations
-template <typename Config> void IBuddyAllocator<Config>::fill() {
-  init_bitmaps(true);
-  BuddyAllocator<Config>::init_free_lists();
-  BuddyAllocator<Config>::_freeSize = 0;
 }

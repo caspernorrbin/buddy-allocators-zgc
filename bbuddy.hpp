@@ -19,14 +19,13 @@ public:
                                       int lazyThreshold, bool startFull);
 
   void deallocate_range(void *ptr, size_t size) override;
-  void fill() override;
 
 protected:
   void *allocate_internal(size_t size) override;
   void deallocate_internal(void *ptr, size_t size) override;
+  void init_bitmaps(bool startFull) override;
 
 private:
-  void init_bitmaps(bool startFull);
   void init_free_lists();
   unsigned int map_index(unsigned int index);
   uint8_t level_alignment(uintptr_t ptr, uint8_t region, uint8_t start_level);
