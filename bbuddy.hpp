@@ -1,5 +1,5 @@
-#ifndef IBUDDY_HPP_
-#define IBUDDY_HPP_
+#ifndef BBUDDY_HPP_
+#define BBUDDY_HPP_
 
 #include "buddy_allocator.hpp"
 #include "buddy_helper.hpp"
@@ -18,8 +18,6 @@ public:
   static BinaryBuddyAllocator *create(void *addr, void *start,
                                       int lazyThreshold, bool startFull);
 
-  void deallocate_range(void *ptr, size_t size) override;
-
 protected:
   void *allocate_internal(size_t size) override;
   void deallocate_internal(void *ptr, size_t size) override;
@@ -31,4 +29,4 @@ private:
   uint8_t level_alignment(uintptr_t ptr, uint8_t region, uint8_t start_level);
 };
 
-#endif // IBUDDY_HPP
+#endif // BBUDDY_HPP

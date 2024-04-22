@@ -22,10 +22,12 @@ struct BuddyConfig {
                          : SIZE_BITS * maxBlockSize / minBlockSize / 8;
 };
 
-using ZConfig = BuddyConfig<4, 18, 8, true, 4>;
+using ZConfig = BuddyConfig<4, 18, 8, false, 4>;
+// using ZConfig = BuddyConfig<4, 18, 8, true, 4>;
 using SmallSingleConfig = BuddyConfig<4, 8, 1, true, 0>;
 using SmallDoubleConfig = BuddyConfig<4, 8, 2, true, 4>;
 using LargeQuadConfig = BuddyConfig<4, 21, 4, true, 0>;
-using MallocConfig = BuddyConfig<4, 26, 20, true, 0>;
+using MallocConfig = BuddyConfig<4, 26, 16, true, 0>;
+// using MallocConfig = BuddyConfig<4, 22, 16, true, 0>;
 
 #endif // BUDDY_CONFIG_HPP_

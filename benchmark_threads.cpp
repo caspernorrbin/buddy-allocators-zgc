@@ -1,6 +1,17 @@
-#include "bbuddy.hpp"
+#include "buddy_allocator.hpp"
 #include "buddy_config.hpp"
-// #include "ibuddy.hpp"
+#include "buddy_helper.hpp"
+#include "buddy_instantiations.hpp"
+
+#include "bbuddy.hpp"
+#include "bbuddy_instantiations.hpp"
+
+#include "btbuddy.hpp"
+#include "btbuddy_instantiations.hpp"
+
+#include "ibuddy.hpp"
+#include "ibuddy_instantiations.hpp"
+
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -14,15 +25,18 @@
 #include <vector>
 
 const int n_cycles = 1;
-const int total_runs = 32;
+const int total_runs = 1;
 const int n_threads = 1;
 const int runs_per_thread = total_runs / n_threads;
 const size_t max_allocs = -1;
 const bool should_free = false;
 
 const bool const_allocs = true;
-const int num_const_allocs = 1000000;
+// const size_t total_alloc_size = 1073741824; // 1GiB
+// const size_t total_alloc_size = 67108864; // 64MiB
+const size_t total_alloc_size = ; // 2MiB
 const size_t const_alloc_size = 16;
+const int allocs_per_thread = total_alloc_size / const_alloc_size / n_threads;
 
 const std::string filename = "runs/dh2.txt";
 // const std::string filename = "runs/ls.txt";
@@ -34,14 +48,13 @@ void allocate_run(BuddyAllocator<MallocConfig> *allocator,
   size_t num_allocations = 0;
   for (int j = 0; j < runs_per_thread; j++) {
     if (const_allocs) {
-      for (int k = 0; k < num_const_allocs; k++) {
+      for (int k = 0; k < allocs_per_thread; k++) {
         void *p = allocator->allocate(const_alloc_size);
         assert(p != nullptr);
         if (should_free) {
           allocations[i].push_back(p);
         }
       }
-
 
     } else {
       for (const auto &size : allocation_sizes) {
@@ -91,7 +104,8 @@ int main() {
 
   BuddyAllocator<MallocConfig> *allocator =
       // IBuddyAllocator<MallocConfig>::create(nullptr, nullptr, 0, false);
-  BinaryBuddyAllocator<MallocConfig>::create(nullptr, nullptr, 0, false);
+      // BinaryBuddyAllocator<MallocConfig>::create(nullptr, nullptr, 0, false);
+      BTBuddyAllocator<MallocConfig>::create(nullptr, nullptr, 0, false);
   // allocator->print_free_list();
 
   std::vector<std::thread> threads(n_threads);
@@ -116,12 +130,14 @@ int main() {
     if (should_free) {
       for (auto &vec : allocations) {
         for (const auto &p : vec) {
-          allocator->deallocate(p);
+          allocator->deallocate(p, const_alloc_size);
         }
         vec.clear();
       }
     }
   }
+
+  // assert(allocator->allocate(1) == nullptr);
 
   auto end_time = std::chrono::high_resolution_clock::now();
   auto duration = end_time - start_time;

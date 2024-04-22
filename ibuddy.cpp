@@ -82,13 +82,22 @@ IBuddyAllocator<Config>::create(void *addr, void *start, int lazyThreshold,
   return new (addr) IBuddyAllocator(start, lazyThreshold, startFull);
 }
 
+// Function to read the CPU cycle counter
+inline unsigned long long rdtsc() {
+  unsigned int low, high;
+  asm volatile("rdtsc" : "=a"(low), "=d"(high));
+  return ((unsigned long long)high << 32) | low;
+}
+
 // Allocates a block of memory of the given size
 template <typename Config>
 void *IBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
+  // auto start = rdtsc();
 
-  std::thread::id this_id = std::this_thread::get_id();
-  std::hash<std::thread::id> hasher;
-  size_t threadOffset = hasher(this_id) % BuddyAllocator<Config>::_numRegions;
+  // std::thread::id this_id = std::this_thread::get_id();
+  // std::hash<std::thread::id> hasher;
+  // size_t threadOffset = hasher(this_id) % BuddyAllocator<Config>::_numRegions;
+  size_t threadOffset = 0;
   bool all_checked = true;
 
   uint8_t region = 0;
@@ -167,6 +176,8 @@ block_found:
     BuddyAllocator<Config>::_freeSizes[region] -=
         BuddyAllocator<Config>::_minSize;
     BuddyAllocator<Config>::_regionMutexes[region].unlock();
+    // auto end = rdtsc();
+    // std::cout << "Time taken: " << (end - start) << std::endl;
     return reinterpret_cast<void *>(block);
   }
 
@@ -204,6 +215,8 @@ block_found:
   BuddyAllocator<Config>::_freeSizes[region] -= new_size;
 
   BuddyAllocator<Config>::_regionMutexes[region].unlock();
+  // auto end = rdtsc();
+  // std::cout << "Time taken: " << (end - start) << std::endl;
   return reinterpret_cast<void *>(block_left);
 }
 

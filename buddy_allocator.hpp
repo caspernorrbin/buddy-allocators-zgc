@@ -4,10 +4,10 @@
 // Include necessary headers
 #include "buddy_config.hpp"
 #include "buddy_helper.hpp"
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
-#include <atomic>
 
 // Define the BuddyAllocator class
 
@@ -26,11 +26,11 @@ public:
   void *allocate(size_t size);
   void deallocate(void *ptr);
   void deallocate(void *ptr, size_t size);
-  virtual void deallocate_range(void *ptr, size_t size) = 0;
+  virtual void deallocate_range(void *ptr, size_t size);
   void empty_lazy_list();
   void fill();
 
-  void print_free_list();
+  virtual void print_free_list();
   void print_bitmaps();
 
 protected:
@@ -41,13 +41,15 @@ protected:
   unsigned int size_of_level(uint8_t level);
   unsigned int index_in_level(uintptr_t ptr, uint8_t region, uint8_t level);
   unsigned int index_of_level(uint8_t level);
+  uint8_t level_of_index(unsigned int index);
   unsigned int block_index(uintptr_t ptr, uint8_t region, uint8_t level);
   unsigned int buddy_index(uintptr_t ptr, uint8_t region, uint8_t level);
-  uint8_t get_level(uintptr_t ptr);
+  uint8_t get_level(uintptr_t ptr, size_t size = 0);
   uint8_t get_region(uintptr_t ptr);
   unsigned int num_blocks(size_t size, uint8_t level);
   uintptr_t get_buddy(uintptr_t ptr, uint8_t level);
   uintptr_t align_left(uintptr_t ptr, uint8_t level);
+  uintptr_t get_address(uint8_t region, unsigned int blockIndex);
   void split_bits(uintptr_t ptr, uint8_t region, uint8_t level_start,
                   uint8_t level_end);
   void set_level(uintptr_t ptr, uint8_t region, uint8_t level);
@@ -103,6 +105,7 @@ private:
   std::mutex _lazyMutexes[Config::numLevels];
 
   // Private member functions
+  uint8_t level_alignment(uintptr_t ptr, uint8_t region, uint8_t start_level);
   void init_lazy_lists(int lazyThreshold);
 };
 

@@ -9,7 +9,7 @@ struct double_link {
 
 class BuddyHelper {
 public:
-  static bool list_empty(double_link *head) { return head->next == head; }
+  static inline bool list_empty(double_link *head) { return head->next == head; }
 
   static void list_remove(double_link *node) {
     node->prev->next = node->next;
@@ -25,7 +25,7 @@ public:
     head->prev = node;
   }
 
-  static double_link *pop_first(double_link *head) {
+  static inline double_link *pop_first(double_link *head) {
     if (list_empty(head)) {
       return nullptr;
     }

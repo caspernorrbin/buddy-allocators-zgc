@@ -1,4 +1,4 @@
-#include "bbuddy.hpp"
+#include "btbuddy.hpp"
 #include <iostream>
 #include <vector>
 
@@ -8,31 +8,34 @@ int main() {
   const int numRegions = 2;
   const int sizeBits = 0;
   const int lazyThreshold = 0;
-  const bool startFull = true;
+  const bool startFull = false;
   const bool useSizeMap = true;
 
   using Config =
       BuddyConfig<minSizeLog2, maxSizeLog2, numRegions, useSizeMap, sizeBits>;
 
   unsigned char mempool[(1U << maxSizeLog2) * numRegions];
-  BinaryBuddyAllocator<SmallSingleConfig> *allocator =
-      BinaryBuddyAllocator<SmallSingleConfig>::create(nullptr, &mempool, lazyThreshold,
+  BTBuddyAllocator<SmallDoubleConfig> *allocator =
+      BTBuddyAllocator<SmallDoubleConfig>::create(nullptr, &mempool, lazyThreshold,
                                            startFull);
 
 
-  allocator->print_free_list();
-  allocator->print_bitmaps();
+  // allocator->print_free_list();
+  // allocator->print_bitmaps();
 
   // allocator->deallocate_range(&mempool[16], (1UL << maxSizeLog2) * numRegions - 16);
   // allocator->deallocate_range(&mempool[0], (1U << maxSizeLog2) * numRegions);
   // allocator->deallocate_range(&mempool[0], 256 + 16);
   // allocator->deallocate_range(&mempool[0] + 16, 512 - 32);
-  allocator->deallocate_range(&mempool[0], 0);
+  // allocator->deallocate_range(&mempool[0], 0);
   // allocator->deallocate_range(&mempool[0] + 512 - 16, 16);
 
-  allocator->print_free_list();
-  allocator->print_bitmaps();
+  // allocator->print_free_list();
+  // allocator->print_bitmaps();
 
+  void *block1 = allocator->allocate(16);
+  allocator->allocate(16);
+  allocator->allocate(16);
   // void *block1 = allocator->allocate(256);
   // allocator->print_free_list();
   // allocator->print_free_list();
@@ -49,7 +52,7 @@ int main() {
   // allocator->print_bitmaps();
   // allocator->deallocate(block3);
   // allocator->deallocate(block2);
-  // allocator->deallocate(block1);
+  allocator->deallocate(block1, 16);
   // allocator->print_free_list();
   // allocator->print_bitmaps();
 
