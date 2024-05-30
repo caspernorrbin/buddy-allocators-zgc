@@ -1,14 +1,14 @@
 .PHONY: all clean
 
-all: src_build test_build benchmarks_build
+all: src tests benchmarks
 
-src_build:
+src:
 	$(MAKE) -C src
 
-test_build: src_build
+tests: src_build
 	$(MAKE) -C tests
 
-benchmarks_build: src_build
+benchmarks: src_build
 	$(MAKE) -C benchmarks/src
 
 clean:
