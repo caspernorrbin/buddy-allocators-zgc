@@ -9,14 +9,6 @@
 #include <sys/mman.h>
 #include <thread>
 
-#ifdef DEBUG
-#define BUDDY_DBG(x) std::cout << x << std::endl;
-#else
-#define BUDDY_DBG(x)                                                           \
-  do {                                                                         \
-  } while (0)
-#endif
-
 template <typename Config>
 void IBuddyAllocator<Config>::init_bitmaps(bool startFull) {
 
@@ -37,9 +29,6 @@ IBuddyAllocator<Config>::IBuddyAllocator(void *start, int lazyThreshold,
   if (!startFull) {
     for (int r = 0; r < Config::numRegions; r++) {
       uintptr_t curr_start = BuddyAllocator<Config>::region_start(r);
-      BUDDY_DBG("start: " << reinterpret_cast<void *>(_start));
-      BUDDY_DBG("curr_start: " << reinterpret_cast<void *>(curr_start));
-      // auto *start_link = reinterpret_cast<double_link *>(curr_start);
 
       // Insert blocks into the free lists
       for (uint8_t lvl = BuddyAllocator<Config>::_numLevels - 1; lvl > 0;
@@ -54,12 +43,8 @@ IBuddyAllocator<Config>::IBuddyAllocator(void *start, int lazyThreshold,
           BuddyAllocator<Config>::push_free_list(i, r, lvl);
         }
       }
-      // BuddyHelper::push_back(&_freeList[r][0], start_link);
       BuddyAllocator<Config>::push_free_list(curr_start, r, 0);
 
-      // Initialize
-      // start_link->prev = &BuddyAllocator<Config>::_freeList[r][0];
-      // start_link->next = &BuddyAllocator<Config>::_freeList[r][0];
     }
   }
 }
@@ -74,7 +59,6 @@ IBuddyAllocator<Config>::create(void *addr, void *start, int lazyThreshold,
                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
     if (addr == MAP_FAILED) {
-      BUDDY_DBG("mmap failed");
       return nullptr;
     }
   }
@@ -92,7 +76,6 @@ inline unsigned long long rdtsc() {
 // Allocates a block of memory of the given size
 template <typename Config>
 void *IBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
-  // auto start = rdtsc();
 
   // std::thread::id this_id = std::this_thread::get_id();
   // std::hash<std::thread::id> hasher;
@@ -142,8 +125,6 @@ void *IBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
 block_found:
 
   uint8_t level = BuddyAllocator<Config>::_topLevel[region];
-  BUDDY_DBG("at region: " << (int)region << ", level: " << (int)level
-                          << " with block size: " << size_of_level(level));
 
   // Get the first free block
   uintptr_t block = BuddyAllocator<Config>::pop_free_list(region, level);
@@ -153,8 +134,6 @@ block_found:
 
   const uintptr_t block_left =
       BuddyAllocator<Config>::align_left(block, block_level);
-  BUDDY_DBG("aligned block " << block_index(block_left, region, level) << " at "
-                             << block_left << " level: " << level);
 
   // Mark above blocks as split
   if (BuddyAllocator<Config>::_sizeMapEnabled) {
@@ -168,17 +147,12 @@ block_found:
   // Mark the block as allocated
   BuddyAllocator<Config>::set_allocated_block(
       region, BuddyAllocator<Config>::block_index(block, region, level), false);
-  BUDDY_DBG("cleared block " << block_index(block, region, level) << " at "
-                             << block << " level: " << (int)level
-                             << " region: " << (int)region);
 
   // Can fit in one block
   if (totalSize <= static_cast<size_t>(BuddyAllocator<Config>::_minSize)) {
     BuddyAllocator<Config>::_freeSizes[region] -=
         BuddyAllocator<Config>::_minSize;
     BuddyAllocator<Config>::_regionMutexes[region].unlock();
-    // auto end = rdtsc();
-    // std::cout << "Time taken: " << (end - start) << std::endl;
     return reinterpret_cast<void *>(block);
   }
 
@@ -189,16 +163,13 @@ block_found:
       BuddyAllocator<Config>::find_smallest_block_level(totalSize);
   const size_t new_size = BuddyHelper::round_up_pow2(totalSize);
 
-  BUDDY_DBG("STARTING LEVEL: " << start_level << " SIZE: " << totalSize);
 
   for (int i = start_level + 1; i < BuddyAllocator<Config>::_numLevels; i++) {
     const unsigned int start_block_idx =
         BuddyAllocator<Config>::block_index(block_left, region, i);
-    BUDDY_DBG("start block index: " << start_block_idx);
     for (unsigned int j = start_block_idx;
          j < start_block_idx + BuddyAllocator<Config>::num_blocks(new_size, i);
          j++) {
-      BUDDY_DBG("clearing block " << j << " level: " << i);
       BuddyAllocator<Config>::set_allocated_block(region, j, false);
     }
   }
@@ -208,7 +179,6 @@ block_found:
        i += BuddyAllocator<Config>::size_of_level(
            BuddyAllocator<Config>::_numLevels - 1)) {
     if (i != block) {
-      BUDDY_DBG("clearing free list at " << i - region_start(region));
       BuddyHelper::list_remove(reinterpret_cast<double_link *>(i));
     }
   }
@@ -216,8 +186,6 @@ block_found:
   BuddyAllocator<Config>::_freeSizes[region] -= new_size;
 
   BuddyAllocator<Config>::_regionMutexes[region].unlock();
-  // auto end = rdtsc();
-  // std::cout << "Time taken: " << (end - start) << std::endl;
   return reinterpret_cast<void *>(block_left);
 }
 
@@ -230,23 +198,16 @@ void IBuddyAllocator<Config>::deallocate_single(uintptr_t ptr) {
   int block_idx = BuddyAllocator<Config>::block_index(ptr, region, level);
   int buddy_idx = BuddyAllocator<Config>::buddy_index(ptr, region, level);
 
-  BUDDY_DBG("block index: "
-            << block_idx << ", buddy index: " << buddy_idx << ", is set: "
-            << BuddyAllocator<Config>::block_is_allocated(region, buddy_idx));
-
   // While the buddy is free, go up a level
   while (level > 0 &&
          BuddyAllocator<Config>::block_is_allocated(region, buddy_idx)) {
     level--;
     block_idx = BuddyAllocator<Config>::block_index(ptr, region, level);
     buddy_idx = BuddyAllocator<Config>::buddy_index(ptr, region, level);
-    BUDDY_DBG("new block index: " << block_idx << " buddy index: " << buddy_idx
-                                  << " level: " << level);
 
     if (BuddyAllocator<Config>::_sizeMapIsBitmap &&
         BuddyAllocator<Config>::_sizeMapEnabled) {
       BuddyAllocator<Config>::set_split_block(region, block_idx, false);
-      BUDDY_DBG("clearing split_idx " << block_idx);
     }
   }
 
@@ -255,9 +216,6 @@ void IBuddyAllocator<Config>::deallocate_single(uintptr_t ptr) {
   if (level > 0) {
 
     BuddyAllocator<Config>::set_allocated_block(region, block_idx, true);
-    BUDDY_DBG("inserting " << ptr - region_start(region)
-                           << " at level: " << (int)level << " marking bit: "
-                           << block_index(ptr, region, level) << " as free");
   }
 
   // Set the level of the topmost free block
@@ -282,7 +240,6 @@ void IBuddyAllocator<Config>::deallocate_range(void *ptr, size_t size) {
        i += BuddyAllocator<Config>::size_of_level(
            BuddyAllocator<Config>::_numLevels - 1)) {
 
-    BUDDY_DBG("deallocating block at " << i);
     deallocate_single(i);
   }
 }

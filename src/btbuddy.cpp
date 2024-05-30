@@ -9,14 +9,6 @@
 #include <sys/mman.h>
 #include <thread>
 
-#ifdef DEBUG
-#define BUDDY_DBG(x) std::cout << x << std::endl;
-#else
-#define BUDDY_DBG(x)                                                           \
-  do {                                                                         \
-  } while (0)
-#endif
-
 template <typename Config>
 void BTBuddyAllocator<Config>::init_bitmaps(bool startFull) {
   const unsigned char freeBlocksPattern = 0x0; // 0x55 = 01010101
@@ -52,7 +44,6 @@ BTBuddyAllocator<Config>::BTBuddyAllocator(void *start, int lazyThreshold,
   if (!startFull) {
     for (int r = 0; r < Config::numRegions; r++) {
       uintptr_t curr_start = BuddyAllocator<Config>::region_start(r);
-      BUDDY_DBG("curr_start: " << reinterpret_cast<void *>(curr_start));
       BuddyAllocator<Config>::push_free_list(curr_start, r, 0);
     }
   }
@@ -63,33 +54,17 @@ BTBuddyAllocator<Config>::BTBuddyAllocator(void *start, int lazyThreshold,
   for (int i = Config::numLevels - 4; i >= 0; i--) {
     _btBits[i] = 8;
   }
-  // for (int i = Config::numLevels - 4; i >= Config::numLevels - 16 && i >= 0;
-  //      i--) {
-  //   _btBits[i] = 4;
-  // }
-  // for (int i = Config::numLevels - 16; i >= 0; i--) {
-  //   _btBits[i] = 8;
-  // }
 
   unsigned int start_offset = 0;
   for (int i = 0; i < Config::numLevels - 1; i++) {
     unsigned int level_blocks = 1U << i;
     unsigned int level_size = level_blocks * _btBits[i];
-    // std::cout << "Level " << i << " bits: " << (int)_btBits[i]
-    // << " size: " << level_size << std::endl;
     // round up to nearest multiple of 8
     level_size = (level_size + 7) & ~7;
-    // std::cout << "Level " << i << " blocks: " << level_blocks
-    // << " size: " << level_size << std::endl;
     start_offset += level_size / 8;
     _levelOffsets[i + 1] = start_offset;
   }
 
-  // print start_offset
-  // for (int i = 0; i < Config::numLevels; i++) {
-  //   std::cout << "Level " << i << " offset: " << _levelOffsets[i] <<
-  //   std::endl;
-  // }
 
   // Initialize bitmaps
   init_bitmaps(startFull);
@@ -105,7 +80,6 @@ BTBuddyAllocator<Config>::create(void *addr, void *start, int lazyThreshold,
                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
     if (addr == MAP_FAILED) {
-      BUDDY_DBG("mmap failed");
       return nullptr;
     }
   }
@@ -175,35 +149,19 @@ inline unsigned char BTBuddyAllocator<Config>::get_tree(uint8_t region,
   const unsigned int offset = _levelOffsets[level];
   const unsigned char num_bits = _btBits[level];
 
-  // const unsigned int index_offset = index - level_start;
   const unsigned int byte_offset =
       offset + (((index - level_start) * num_bits) >> 3U);
-  // const unsigned int bit_offset = index_offset * num_bits % 8;
   const unsigned int bit_offset = ((index - level_start) * num_bits) & 0x7U;
 
   const unsigned char byte = _btTree[region][byte_offset];
-  // const unsigned char value = (byte >> bit_offset) & (0xFF >> (8 -
-  // num_bits));
-  // const unsigned char value = (byte >> bit_offset) & ((1U << num_bits) - 1U);
   return (byte >> bit_offset) & (0xFF >> (8 - num_bits));
-
-  // return value;
 }
-
-// Function to read the CPU cycle counter
-// inline unsigned long long rdtsc() {
-//   unsigned int low, high;
-//   asm volatile("rdtsc" : "=a"(low), "=d"(high));
-//   return ((unsigned long long)high << 32) | low;
-// }
 
 // Allocates a block of memory of the given size
 template <typename Config>
 void *BTBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
 
-  // auto start = rdtsc();
   const uint8_t block_height = tree_height(totalSize);
-  BUDDY_DBG("block_height: " << block_height);
 
   // const std::thread::id this_id = std::this_thread::get_id();
   // const std::hash<std::thread::id> hasher;
@@ -260,18 +218,15 @@ void *BTBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
         } else if (right_value >= block_height) {
           tree_index = 2 * tree_index + 2;
         } else {
-          BUDDY_DBG("No block found");
           BuddyAllocator<Config>::_regionMutexes[r].unlock();
           return nullptr;
         }
       }
 
-      BUDDY_DBG("tree_index: " << tree_index);
       set_tree(r, tree_index, 0);
 
       const uintptr_t block =
           BuddyAllocator<Config>::get_address(r, tree_index);
-      BUDDY_DBG("block: " << reinterpret_cast<void *>(block));
       // Store the size if not a bitmap
       if (!BuddyAllocator<Config>::_sizeMapIsBitmap &&
           BuddyAllocator<Config>::_sizeMapEnabled) {
@@ -300,7 +255,6 @@ void *BTBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
         if (BuddyAllocator<Config>::_sizeMapIsBitmap &&
             BuddyAllocator<Config>::_sizeMapEnabled) {
           BuddyAllocator<Config>::set_split_block(r, tree_index, true);
-          BUDDY_DBG("setting split_idx " << tree_index);
         }
         tree_index = (tree_index - 1) / 2;
       }
@@ -309,8 +263,6 @@ void *BTBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
           BuddyHelper::round_up_pow2(totalSize);
 
       BuddyAllocator<Config>::_regionMutexes[r].unlock();
-      // auto end = rdtsc();
-      // std::cout << "Time taken: " << (end - start) << std::endl;
       return reinterpret_cast<void *>(block);
     }
   }
@@ -324,10 +276,6 @@ void BTBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
   auto block = reinterpret_cast<uintptr_t>(ptr);
   const uint8_t region = BuddyAllocator<Config>::get_region(block);
   uint8_t level = BuddyAllocator<Config>::get_level(block, size);
-  BUDDY_DBG("deallocating! block "
-            << BuddyAllocator<Config>::block_index(block, region, level)
-            << " region " << static_cast<int>(region)
-            << " level: " << static_cast<int>(level) << " size: " << size);
 
   const uint8_t block_height = tree_height(size);
   unsigned int block_index =
@@ -341,19 +289,14 @@ void BTBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
   for (uint8_t l = block_height; l < BuddyAllocator<Config>::_numLevels; l++) {
     const unsigned char left_value = get_tree(region, 2 * block_index + 1);
     const unsigned char right_value = get_tree(region, 2 * block_index + 2);
-    BUDDY_DBG("left child value: " << (int)left_value << " right child value: "
-                                   << (int)right_value);
 
     // Set the parent value to the maximum of the children
     if (left_value == right_value && left_value == l) {
-      // _btTree[region][block_index] = l + 1;
       set_tree(region, block_index, l + 1);
       BuddyAllocator<Config>::set_split_block(region, block_index, false);
     } else {
       set_tree(region, block_index,
                left_value > right_value ? left_value : right_value);
-      // _btTree[region][block_index] =
-      // left_value > right_value ? left_value : right_value;
     }
     block_index = (block_index - 1) / 2;
   }

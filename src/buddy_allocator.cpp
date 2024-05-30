@@ -10,14 +10,6 @@
 #include <iostream>
 #include <sys/mman.h>
 
-#ifdef DEBUG
-#define BUDDY_DBG(x) std::cout << x << std::endl;
-#else
-#define BUDDY_DBG(x)                                                           \
-  do {                                                                         \
-  } while (0)
-#endif
-
 template <typename Config>
 inline uintptr_t BuddyAllocator<Config>::region_start(uint8_t region) {
   return _start + (region << _maxBlockSizeLog2);
@@ -82,17 +74,12 @@ uint8_t BuddyAllocator<Config>::get_level(uintptr_t ptr, size_t size) {
     const int byteIndex = index / 2;
     const int bitOffset = (index % 2) * 4;
 
-    BUDDY_DBG("getting level at " << index << " byte index: " << byteIndex
-                                  << " bit offset: " << bitOffset);
-
     return (_sizeMap[region][byteIndex] >> bitOffset) & 0xF;
   }
 
   for (uint8_t i = _numLevels - 1; i > 0; i--) {
-    // BUDDY_DBG("block_index: " << block_index(ptr, region, i - 1));
     if (BuddyHelper::bit_is_set(_sizeMap[region],
                                 block_index(ptr, region, i - 1))) {
-      BUDDY_DBG("level is: " << (int)i);
       return i;
     }
   }
@@ -165,39 +152,11 @@ template <typename Config>
 uint8_t BuddyAllocator<Config>::find_smallest_block_level(size_t size) {
   for (size_t i = _minBlockSizeLog2; i <= _maxBlockSizeLog2; i++) {
     if (size <= 1U << i) {
-      BUDDY_DBG("level: " << _maxBlockSizeLog2 - i << " size: " << (1 << i));
       return _maxBlockSizeLog2 - i;
     }
   }
   return -1;
 }
-
-// Returns the level of the smallest block that can fit the given size
-// template <typename Config>
-// uint8_t BuddyAllocator<Config>::find_smallest_block_level(size_t size) {
-//   // Determine the level directly using logarithmic calculations
-//   if (size == 0) {
-//     return -1; // Invalid size
-//   }
-
-//   // Calculate the logarithm base 2 of size
-//   int logSize = std::log2(size);
-
-//   // Ensure we consider the next higher level if size is not a power of 2
-//   if (size & (size - 1)) {
-//     logSize += 1;
-//   }
-
-//   // Ensure logSize is within the valid range of block levels
-//   int level = _maxBlockSizeLog2 - logSize;
-//   if (level >= 0 && level <= (_maxBlockSizeLog2 - _minBlockSizeLog2)) {
-//     BUDDY_DBG("level: " << level
-//                         << " size: " << (1 << (_maxBlockSizeLog2 - level)));
-//     return level;
-//   }
-
-//   return -1; // Invalid size or level
-// }
 
 // Sets the level of the given block in the size map
 template <typename Config>
@@ -211,8 +170,6 @@ void BuddyAllocator<Config>::set_level(uintptr_t ptr, uint8_t region,
 
   const unsigned int byteIndex = index / 2;
   const unsigned int bitOffset = (index % 2) * 4;
-  BUDDY_DBG("setting level at " << index << " byte index: " << byteIndex
-                                << " bit offset: " << bitOffset);
 
   _sizeMap[region][byteIndex] &=
       ~(0xFU << bitOffset); // Clear the bits for the current level
@@ -225,11 +182,7 @@ template <typename Config>
 void BuddyAllocator<Config>::split_bits(uintptr_t ptr, uint8_t region,
                                         uint8_t level_start,
                                         uint8_t level_end) {
-  BUDDY_DBG("splitting bits from " << (int)level_start << " to "
-                                   << (int)level_end << " in region "
-                                   << region);
   for (uint8_t i = level_start; i < level_end && i < _numLevels - 1; i++) {
-    BUDDY_DBG("splitting bit at " << block_index(ptr, region, i));
     BuddyHelper::set_bit(_sizeMap[region], block_index(ptr, region, i));
   }
 }
@@ -321,7 +274,6 @@ BuddyAllocator<Config>::BuddyAllocator(void *start, int lazyThreshold,
                  PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
     if (start == MAP_FAILED) {
-      BUDDY_DBG("mmap failed");
       exit(1);
     }
   }
@@ -352,7 +304,6 @@ template <typename Config>
 void *BuddyAllocator<Config>::allocate(size_t totalSize) {
   // Allocation too large
   if (totalSize > _maxSize) {
-    BUDDY_DBG("Requested size is too large");
     return nullptr;
   }
 
@@ -364,12 +315,6 @@ void *BuddyAllocator<Config>::allocate(size_t totalSize) {
       _lazyListSize[level]--;
       _freeSizes[_numRegions] -= BuddyHelper::round_up_pow2(totalSize);
       _lazyMutexes[level].unlock();
-      // BUDDY_DBG("Allocated block "
-      //           << block_index(reinterpret_cast<uintptr_t>(block),
-      //                          get_region(reinterpret_cast<uintptr_t>(block)),
-      //                          _numLevels - 1)
-      //           << " at " << reinterpret_cast<uintptr_t>(block) - _start
-      //           << " level: " << _numLevels - 1);
       return block;
     }
     _lazyMutexes[level].unlock();
@@ -400,18 +345,10 @@ void BuddyAllocator<Config>::deallocate(void *ptr, size_t size) {
 
   if (_lazyListSize[level] < _lazyThresholds[level]) {
     _lazyMutexes[level].lock();
-    BUDDY_DBG("inserting " << reinterpret_cast<uintptr_t>(ptr) - _start
-                           << " with index "
-                           << block_index(
-                                  reinterpret_cast<uintptr_t>(ptr),
-                                  get_region(reinterpret_cast<uintptr_t>(ptr)),
-                                  _numLevels - 1)
-                           << " into lazy list");
     BuddyHelper::push_back(&_lazyList[level], static_cast<double_link *>(ptr));
     _lazyListSize[level]++;
     _freeSizes[_numRegions] += BuddyHelper::round_up_pow2(size);
     _lazyMutexes[level].unlock();
-    BUDDY_DBG("lazy list size: " << _lazyListSize[level]);
     return;
   }
 
@@ -426,7 +363,6 @@ template <typename Config> void BuddyAllocator<Config>::deallocate(void *ptr) {
   }
 
   size_t size = get_alloc_size(reinterpret_cast<uintptr_t>(ptr));
-  BUDDY_DBG("deallocate size: " << size);
   return deallocate(ptr, size);
 }
 
@@ -454,10 +390,6 @@ void BuddyAllocator<Config>::deallocate_range(void *ptr, size_t size) {
 
     size_t region_size = region_end - region_start;
     while (region_start < region_end) {
-      BUDDY_DBG("size: " << region_size);
-      BUDDY_DBG("aligned_start: " << reinterpret_cast<void *>(region_start)
-                                  << " end: "
-                                  << reinterpret_cast<void *>(region_end));
 
       const uint8_t max_level =
           BuddyAllocator<Config>::find_smallest_block_level(region_size);
@@ -473,14 +405,8 @@ void BuddyAllocator<Config>::deallocate_range(void *ptr, size_t size) {
         block_size = BuddyAllocator<Config>::size_of_level(level);
       }
 
-      BUDDY_DBG("deallocating block "
-                << BuddyAllocator<Config>::block_index(region_start, r, level)
-                << " region " << static_cast<int>(r) << " level: "
-                << static_cast<int>(level) << " size: " << block_size);
-
       // Clear all smaller levels
       for (int i = level + 1; i < BuddyAllocator<Config>::_numLevels; i++) {
-        BUDDY_DBG("deallocating level " << static_cast<int>(i));
         const unsigned int start_block_idx =
             BuddyAllocator<Config>::block_index(region_start, r, i);
         for (unsigned int j = start_block_idx;
@@ -499,9 +425,6 @@ void BuddyAllocator<Config>::deallocate_range(void *ptr, size_t size) {
         // Clear final split bit
         if (BuddyAllocator<Config>::_sizeMapIsBitmap &&
             level < BuddyAllocator<Config>::_numLevels - 1) {
-          BUDDY_DBG(
-              "clearing split_idx "
-              << BuddyAllocator<Config>::block_index(region_start, r, level));
           BuddyAllocator<Config>::set_split_block(
               r, BuddyAllocator<Config>::block_index(region_start, r, level),
               false);

@@ -9,14 +9,6 @@
 #include <sys/mman.h>
 #include <thread>
 
-#ifdef DEBUG
-#define BUDDY_DBG(x) std::cout << x << std::endl;
-#else
-#define BUDDY_DBG(x)                                                           \
-  do {                                                                         \
-  } while (0)
-#endif
-
 template <typename Config>
 void BinaryBuddyAllocator<Config>::init_bitmaps(bool startFull) {
   const unsigned char freeBlocksPattern = 0x0; // 0x55 = 01010101
@@ -38,7 +30,6 @@ BinaryBuddyAllocator<Config>::BinaryBuddyAllocator(void *start,
   if (!startFull) {
     for (int r = 0; r < Config::numRegions; r++) {
       uintptr_t curr_start = BuddyAllocator<Config>::region_start(r);
-      BUDDY_DBG("curr_start: " << reinterpret_cast<void *>(curr_start));
       BuddyAllocator<Config>::push_free_list(curr_start, r, 0);
     }
   }
@@ -54,7 +45,6 @@ BinaryBuddyAllocator<Config>::create(void *addr, void *start, int lazyThreshold,
                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
     if (addr == MAP_FAILED) {
-      BUDDY_DBG("mmap failed");
       return nullptr;
     }
   }
@@ -118,14 +108,12 @@ void *BinaryBuddyAllocator<Config>::allocate_internal(size_t totalSize) {
             if (BuddyAllocator<Config>::_sizeMapIsBitmap &&
                 BuddyAllocator<Config>::_sizeMapEnabled) {
               BuddyAllocator<Config>::set_split_block(r, block_idx, true);
-              BUDDY_DBG("setting split_idx " << block_idx);
             }
 
             // Mark block as allocated
             if (block_level > 0) {
               BuddyAllocator<Config>::flip_allocated_block(
                   r, map_index(block_idx));
-              BUDDY_DBG("flipping bit: " << map_index(block_idx));
             }
 
             // Split the block into two
@@ -158,8 +146,6 @@ block_found:
   // Mark block as allocated
   BuddyAllocator<Config>::flip_allocated_block(
       r, map_index(BuddyAllocator<Config>::block_index(block, r, block_level)));
-  BUDDY_DBG("flipping final bit: " << map_index(
-                BuddyAllocator<Config>::block_index(block, r, block_level)));
 
   // Store the size if not a bitmap
   if (!BuddyAllocator<Config>::_sizeMapIsBitmap &&
@@ -179,14 +165,8 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
   auto block = reinterpret_cast<uintptr_t>(ptr);
   const uint8_t region = BuddyAllocator<Config>::get_region(block);
   uint8_t level = BuddyAllocator<Config>::get_level(block, size);
-  BUDDY_DBG("deallocating! block "
-            << BuddyAllocator<Config>::block_index(block, region, level)
-            << " region " << static_cast<int>(region)
-            << " level: " << static_cast<int>(level) << " size: " << size);
 
   // Mark block as free
-  BUDDY_DBG("flipping bit: " << map_index(
-                BuddyAllocator<Config>::block_index(block, region, level)));
   BuddyAllocator<Config>::flip_allocated_block(
       region,
       map_index(BuddyAllocator<Config>::block_index(block, region, level)));
@@ -199,9 +179,6 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
                           region, map_index(BuddyAllocator<Config>::block_index(
                                       buddy, region, level)))) {
 
-    BUDDY_DBG("merging blocks: " << reinterpret_cast<void *>(block) << " and "
-                                 << reinterpret_cast<void *>(buddy));
-
     // Mark above block as no longer split
     if (level < BuddyAllocator<Config>::_numLevels - 1 &&
         BuddyAllocator<Config>::_sizeMapIsBitmap &&
@@ -209,8 +186,6 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
       BuddyAllocator<Config>::set_split_block(
           region, BuddyAllocator<Config>::block_index(block, region, level),
           false);
-      BUDDY_DBG("clearing split_idx "
-                << BuddyAllocator<Config>::block_index(block, region, level));
     }
 
     // Remove buddy from free list
@@ -229,8 +204,6 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
       BuddyAllocator<Config>::flip_allocated_block(
           region,
           map_index(BuddyAllocator<Config>::block_index(block, region, level)));
-      BUDDY_DBG("flipping bittt: " << map_index(
-                    BuddyAllocator<Config>::block_index(block, region, level)));
     }
   }
 
@@ -241,8 +214,6 @@ void BinaryBuddyAllocator<Config>::deallocate_internal(void *ptr, size_t size) {
     BuddyAllocator<Config>::set_split_block(
         region, BuddyAllocator<Config>::block_index(block, region, level),
         false);
-    BUDDY_DBG("clearing split_idx "
-              << BuddyAllocator<Config>::block_index(block, region, level));
   }
 
   BuddyAllocator<Config>::_freeSizes[region] += size;
