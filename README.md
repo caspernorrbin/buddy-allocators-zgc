@@ -83,4 +83,4 @@ The tools for performance evaluation can be found in the `benchmarks` directory.
 
 This project was developed as part of a master's thesis titled "Adapting and Evaluating Buddy Allocators for use Within ZGC" by Casper Norrbin at Uppsala University.
 
-For more details, refer to the [completed thesis](https://github.com/caspernorrbin/master-thesis-oracle).
+For more details, refer to the [completed thesis](https://github.com/caspernorrbin/thesis-zgc-allocators).
